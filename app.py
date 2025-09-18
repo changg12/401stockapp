@@ -16,5 +16,9 @@ def stock():
 def cart():
     return render_template("cart.html")
 
+@app.route("/cart1")
+def cart1():
+    return render_template("cart1.html")
+
 if __name__ == "__main__":
     app.run(debug=True)
