@@ -2,6 +2,8 @@ from flask import Flask, render_template, redirect, url_for, flash, request
 from flask_bootstrap import Bootstrap5
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask import session
+
 
 app = Flask(__name__)
 bootstrap = Bootstrap5(app)
@@ -28,6 +30,7 @@ class User(db.Model):
 def home():
     return render_template("stock.html")
 
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -37,8 +40,10 @@ def login():
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password_hash, password):
+            session['user_id'] = user.id
+            session['user_name'] = user.full_name  # optional
             flash("Login successful!", "success")
-            return redirect(url_for("home")) 
+            return redirect(url_for("home"))
         else:
             flash("Invalid email or password", "danger")
             return redirect(url_for("login"))
@@ -46,8 +51,18 @@ def login():
     return render_template("login.html")
 
 
-@app.route("/cart")
-def cart():
+@app.route("/logout")
+def logout():
+    session.pop('user_id', None)
+    session.pop('user_name', None)
+    flash("You have been logged out.", "info")
+    return redirect(url_for("home"))
+
+
+
+
+@app.route("/orders")
+def orders():
     return render_template("cart.html")
 
 @app.route("/signup", methods=["GET", "POST"])
