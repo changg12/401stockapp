@@ -5,6 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title>Your Portfolio</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.0.0/dist/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+    <style>
+      body {
+        font-size: .875rem;
+      }
+      .container {
+      width: 100%;
+      padding-right: 15px;
+      padding-left: 15px;
+      margin-right: auto;
+      margin-left: auto
+      }
+      @media (min-width:1250px) {.container {
+      max-width: 1240px;
+      }
+      }
+    </style>  
   </head>
   <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
@@ -48,12 +64,12 @@
       {% endwith %}
 
       <div class="row">
-        <div class="col-lg-8">
+        <div class="col-lg-9">
           <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
-              <h5 class="mb-0">Holdings</h5>
+              <h5 class="mb-0">Portfolio</h5>
               <div class="text-muted small text-right">
-                <div>Cost basis: ${{ '%.2f' % total_cost_basis }}</div>
+                <div>Cost: ${{ '%.2f' % total_cost_basis }}</div>
                 {% if total_market_value is not none %}
                   <div>Market value: ${{ '%.2f' % total_market_value }}</div>
                 {% endif %}
@@ -130,20 +146,20 @@
           </div>
           {% if unrealized_pl is not none %}
           <div class="alert {{ 'alert-success' if unrealized_pl >= 0 else 'alert-danger' }}" role="alert">
-            Unrealized P/L: ${{ '%.2f' % unrealized_pl }}
+            Unrealized Profit or Loss: ${{ '%.2f' % unrealized_pl }}
           </div>
           {% endif %}
         </div>
-        <div class="col-lg-4">
+        <div class="col-lg-3">
           <div class="card">
             <div class="card-header">
-              <h5 class="mb-0">Add Holding</h5>
+              <h5 class="mb-0">Add Holding/Stock</h5>
             </div>
             <div class="card-body">
               <form method="post">
                 <div class="form-group">
-                  <label for="symbol">Ticker Symbol</label>
-                  <input type="text" class="form-control" id="symbol" name="symbol" placeholder="e.g. AAPL" list="symbolOptions" autocomplete="off" required>
+                  <label for="symbol">Stock Symbol</label>
+                  <input type="text" class="form-control" id="symbol" name="symbol" placeholder="e.g. AAPL" autocomplete="off" required>
                 </div>
                 <div class="form-group">
                   <label for="last-sale-value">Last Sale (reference)</label>
@@ -159,7 +175,6 @@
                 </div>
                 <button type="submit" class="btn btn-primary btn-block">Save Holding</button>
               </form>
-              <datalist id="symbolOptions"></datalist>
             </div>
           </div>
         </div>
@@ -172,102 +187,58 @@
     <script>
       document.addEventListener('DOMContentLoaded', function () {
         var symbolInput = document.getElementById('symbol');
-        var datalist = document.getElementById('symbolOptions');
         var lastSaleEl = document.getElementById('last-sale-value');
-        var suggestions = [];
-        var activeController = null;
 
-        function updateLastSale(symbol) {
+        function resetState() {
+          lastSaleEl.textContent = '—';
+          symbolInput.setCustomValidity('');
+        }
+
+        function verifySymbol(symbol) {
           if (!symbol) {
-            lastSaleEl.textContent = '—';
-            return;
-          }
-
-          var match = suggestions.find(function (item) {
-            return item.symbol === symbol;
-          });
-
-          if (match && match.lastsale !== null && match.lastsale !== undefined) {
-            lastSaleEl.textContent = '$' + match.lastsale.toFixed(2);
+            resetState();
             return;
           }
 
           fetch('/api/symbols?q=' + encodeURIComponent(symbol) + '&limit=1')
             .then(function (response) {
               if (!response.ok) {
-                throw new Error('Warning: Network response was not ok');
+                throw new Error('Network response was not ok');
               }
               return response.json();
             })
             .then(function (data) {
-              if (data.length && data[0].lastsale !== null && data[0].lastsale !== undefined) {
-                lastSaleEl.textContent = '$' + data[0].lastsale.toFixed(2);
+              if (!data.length || data[0].symbol !== symbol) {
+                lastSaleEl.textContent = '—';
+                symbolInput.setCustomValidity('Symbol not found in database.');
+                symbolInput.reportValidity();
+                return;
+              }
+
+              var lastSale = data[0].lastsale;
+              if (lastSale !== null && lastSale !== undefined) {
+                lastSaleEl.textContent = '$' + lastSale.toFixed(2);
               } else {
                 lastSaleEl.textContent = '—';
               }
+              symbolInput.setCustomValidity('');
             })
             .catch(function () {
               lastSaleEl.textContent = '—';
+              symbolInput.setCustomValidity('Unable to verify symbol at this time.');
+              symbolInput.reportValidity();
             });
-        }
-
-        function populateDatalist(items) {
-          datalist.innerHTML = '';
-          items.forEach(function (item) {
-            var option = document.createElement('option');
-            option.value = item.symbol;
-            var descriptor = item.symbol + ' | ' + (item.name || '');
-            if (item.market) {
-              descriptor += ' (' + item.market + ')';
-            }
-            option.textContent = descriptor;
-            option.setAttribute('label', descriptor);
-            datalist.appendChild(option);
-          });
         }
 
         symbolInput.addEventListener('input', function () {
-          var query = symbolInput.value.toUpperCase();
-          lastSaleEl.textContent = '—';
-
-          if (activeController) {
-            activeController.abort();
-          }
-
-          if (!query || query.length < 1) {
-            datalist.innerHTML = '';
-            suggestions = [];
-            return;
-          }
-
-          if (window.AbortController) {
-            activeController = new AbortController();
-          }
-
-          fetch('/api/symbols?q=' + encodeURIComponent(query), {
-            signal: activeController ? activeController.signal : undefined
-          })
-            .then(function (response) {
-              if (!response.ok) {
-                throw new Error('Warning: Network response was not ok');
-              }
-              return response.json();
-            })
-            .then(function (data) {
-              suggestions = data || [];
-              populateDatalist(suggestions);
-            })
-            .catch(function (error) {
-              if (error.name !== 'AbortError') {
-                suggestions = [];
-                datalist.innerHTML = '';
-              }
-            });
+          symbolInput.value = symbolInput.value.toUpperCase();
+          resetState();
         });
 
-        symbolInput.addEventListener('change', function () {
-          var symbol = symbolInput.value.toUpperCase();
-          updateLastSale(symbol);
+        symbolInput.addEventListener('blur', function () {
+          var symbol = symbolInput.value.trim().toUpperCase();
+          symbolInput.value = symbol;
+          verifySymbol(symbol);
         });
       });
     </script>
