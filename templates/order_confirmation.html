@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="">
+    <meta name="author" content="">
+    <link rel="icon" href="../../../../favicon.ico">
+
+    <title>Order Confirmation</title>
+
+    <!-- Bootstrap core CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.0.0/dist/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+
+    <style>
+      .confirmation-header {
+        background: linear-gradient(135deg, #28a745, #20c997);
+        color: white;
+        padding: 3rem 0;
+        margin-bottom: 2rem;
+      }
+      .order-card {
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        border: none;
+        margin-bottom: 1.5rem;
+      }
+      .order-card .card-header {
+        background-color: #f8f9fa;
+        border-bottom: 2px solid #dee2e6;
+      }
+      .status-badge {
+        font-size: 0.9rem;
+        padding: 0.5rem 1rem;
+      }
+      .item-row {
+        border-bottom: 1px solid #e9ecef;
+        padding: 1rem 0;
+      }
+      .item-row:last-child {
+        border-bottom: none;
+      }
+      .total-row {
+        background-color: #f8f9fa;
+        font-weight: bold;
+        font-size: 1.1rem;
+      }
+      .checkmark {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background-color: #28a745;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 1rem;
+        font-size: 2rem;
+      }
+    </style>
+  </head>
+
+  <body class="bg-light">
+
+
+    <div class="confirmation-header text-center">
+      <div class="container">
+        <div class="checkmark">
+          <i class="fas fa-check">✓</i>
+        </div>
+        <h1 class="display-4">Order Confirmed!</h1>
+        <p class="lead">Thank you for your purchase. Your order has been successfully processed.</p>
+        <p class="mb-0">Order #{{ order.id }} | {{ order.created_at.strftime('%B %d, %Y at %I:%M %p') }}</p>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="row">
+        
+        
+        <div class="col-lg-8 mb-4">
+          <div class="card order-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <h5 class="mb-0">Order Details</h5>
+              <span class="badge badge-success status-badge">{{ order.status.title() }}</span>
+            </div>
+            <div class="card-body">
+              
+              
+              <h6 class="mb-3">Items Ordered</h6>
+              {% for item in order_items %}
+              <div class="item-row">
+                <div class="row align-items-center">
+                  <div class="col-md-6">
+                    <h6 class="mb-1">{{ item.product_name }}</h6>
+                    <small class="text-muted">{{ item.description }}</small>
+                  </div>
+                  <div class="col-md-2 text-center">
+                    <span class="text-muted">Qty: {{ item.quantity }}</span>
+                  </div>
+                  <div class="col-md-2 text-center">
+                    <span class="text-muted">${{ "%.2f"|format(item.price) }}</span>
+                  </div>
+                  <div class="col-md-2 text-right">
+                    <strong>${{ "%.2f"|format(item.price * item.quantity) }}</strong>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+              
+              
+              <div class="item-row total-row">
+                <div class="row">
+                  <div class="col-md-8">
+                    <div class="row">
+                      <div class="col-6">Subtotal:</div>
+                      <div class="col-6 text-right">${{ "%.2f"|format(order.total_amount + order.discount_amount) }}</div>
+                    </div>
+                    {% if order.promo_code %}
+                    <div class="row text-success">
+                      <div class="col-6">Discount ({{ order.promo_code }}):</div>
+                      <div class="col-6 text-right">-${{ "%.2f"|format(order.discount_amount) }}</div>
+                    </div>
+                    {% endif %}
+                  </div>
+                  <div class="col-md-4">
+                    <div class="row">
+                      <div class="col-6">Total:</div>
+                      <div class="col-6 text-right text-primary">${{ "%.2f"|format(order.total_amount) }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        
+        <div class="col-lg-4">
+          
+          
+          <div class="card order-card">
+            <div class="card-header">
+              <h6 class="mb-0">Shipping Address</h6>
+            </div>
+            <div class="card-body">
+              <address class="mb-0">
+                <strong>{{ order.first_name }} {{ order.last_name }}</strong><br>
+                {{ order.address }}<br>
+                {% if order.address2 %}{{ order.address2 }}<br>{% endif %}
+                {{ order.state }}, {{ order.zip_code }}<br>
+                {{ order.country }}
+              </address>
+            </div>
+          </div>
+
+          
+          <div class="card order-card">
+            <div class="card-header">
+              <h6 class="mb-0">Payment Method</h6>
+            </div>
+            <div class="card-body">
+              <div class="d-flex align-items-center">
+                <div class="mr-3">
+                  {% if order.payment_method == 'credit' %}
+                    <i class="fas fa-credit-card text-primary"></i> Credit Card
+                  {% elif order.payment_method == 'debit' %}
+                    <i class="fas fa-credit-card text-info"></i> Debit Card
+                  {% elif order.payment_method == 'paypal' %}
+                    <i class="fab fa-paypal text-primary"></i> PayPal
+                  {% endif %}
+                </div>
+                <div>
+                  {% if order.card_number_last4 %}
+                    <div><strong>{{ order.card_name }}</strong></div>
+                    <small class="text-muted">**** **** **** {{ order.card_number_last4 }}</small>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          
+          <div class="card order-card">
+            <div class="card-header">
+              <h6 class="mb-0">Contact Information</h6>
+            </div>
+            <div class="card-body">
+              <p class="mb-1"><strong>Email:</strong> {{ order.email or 'Not provided' }}</p>
+              <p class="mb-0"><strong>Username:</strong> @{{ order.username }}</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      
+      <div class="row mt-4 mb-5">
+        <div class="col-12 text-center">
+          <a href="{{ url_for('home') }}" class="btn btn-primary btn-lg mr-3">Continue Shopping</a>
+          {% if session.user_id %}
+          <a href="{{ url_for('my_orders') }}" class="btn btn-outline-secondary btn-lg">View All Orders</a>
+          {% endif %}
+        </div>
+      </div>
+
+      
+      <div class="row">
+        <div class="col-12">
+          <div class="alert alert-info text-center">
+            <i class="fas fa-envelope mr-2"></i>
+            A confirmation email has been sent to <strong>{{ order.email or 'your registered email' }}</strong> with order details and tracking information.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    
+    <footer class="my-5 pt-5 text-muted text-center text-small">
+      <p class="mb-1">&copy; 2024 Company Name</p>
+      <ul class="list-inline">
+        <li class="list-inline-item"><a href="#">Privacy</a></li>
+        <li class="list-inline-item"><a href="#">Terms</a></li>
+        <li class="list-inline-item"><a href="#">Support</a></li>
+      </ul>
+    </footer>
+
+    <!-- Bootstrap core JavaScript -->
+    <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.12.9/dist/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.0.0/dist/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
+  </body>
+</html>
