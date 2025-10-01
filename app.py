@@ -28,36 +28,21 @@ class User(db.Model):
 
 
 
-class SavedPaymentInfo(db.Model):
+
+# New model for storing payment info for orders
+class OrderPayment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    
-    
-    first_name = db.Column(db.String(50), nullable=False)
-    last_name = db.Column(db.String(50), nullable=False)
-    username = db.Column(db.String(50), nullable=False)
-    email = db.Column(db.String(255), nullable=True)
-    address = db.Column(db.String(255), nullable=False)
-    address2 = db.Column(db.String(255), nullable=True)
-    country = db.Column(db.String(50), nullable=False)
-    state = db.Column(db.String(50), nullable=False)
-    zip_code = db.Column(db.String(20), nullable=False)
-    
-    
-    payment_method = db.Column(db.String(20), nullable=False)  
+    payment_type = db.Column(db.String(20), nullable=False)  # 'credit', 'debit', 'bank'
     card_name = db.Column(db.String(100), nullable=True)
-    card_number_last4 = db.Column(db.String(4), nullable=True)  
-    card_expiration = db.Column(db.String(7), nullable=True)  
-    
-    
-    same_address = db.Column(db.Boolean, default=False)
-    
-    
+    card_number_last4 = db.Column(db.String(4), nullable=True)
+    card_expiration = db.Column(db.String(7), nullable=True)
+    bank_account_number = db.Column(db.String(20), nullable=True)
+    bank_routing_number = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    
-    __table_args__ = (db.UniqueConstraint('user_id', name='unique_user_saved_payment'),)
+    __table_args__ = (db.UniqueConstraint('user_id', 'card_number_last4', 'bank_account_number', name='unique_user_payment'),)
 
 
 class PortfolioHolding(db.Model):
@@ -243,94 +228,64 @@ def logout():
 
 @app.route("/orders", methods=["GET", "POST"])
 def orders():
-    if request.method == "POST":
-        try:
-            
-            save_info = 'save-info' in request.form
-            
-            
-            user_id = session.get('user_id')
-            
-            
-            if user_id and save_info:
-                
-                first_name = request.form.get('firstName')
-                last_name = request.form.get('lastName')
-                username = request.form.get('username')
-                email = request.form.get('email')
-                address = request.form.get('address')
-                address2 = request.form.get('address2')
-                country = request.form.get('country')
-                state = request.form.get('state')
-                zip_code = request.form.get('zip')
-                payment_method = request.form.get('paymentMethod')
-                card_name = request.form.get('cc-name')
-                card_number = request.form.get('cc-number')
-                card_expiration = request.form.get('cc-expiration')
-                card_number_last4 = card_number[-4:] if card_number else None
-                same_address = 'same-address' in request.form
-                
-                
-                existing_saved_info = SavedPaymentInfo.query.filter_by(user_id=user_id).first()
-                
-                if existing_saved_info:
-                    
-                    existing_saved_info.first_name = first_name
-                    existing_saved_info.last_name = last_name
-                    existing_saved_info.username = username
-                    existing_saved_info.email = email
-                    existing_saved_info.address = address
-                    existing_saved_info.address2 = address2
-                    existing_saved_info.country = country
-                    existing_saved_info.state = state
-                    existing_saved_info.zip_code = zip_code
-                    existing_saved_info.payment_method = payment_method
-                    existing_saved_info.card_name = card_name
-                    existing_saved_info.card_number_last4 = card_number_last4
-                    existing_saved_info.card_expiration = card_expiration
-                    existing_saved_info.same_address = same_address
-                    existing_saved_info.updated_at = datetime.utcnow()
-                    flash("Payment information updated successfully!", "info")
-                else:
-                    
-                    saved_payment_info = SavedPaymentInfo(
-                        user_id=user_id,
-                        first_name=first_name,
-                        last_name=last_name,
-                        username=username,
-                        email=email,
-                        address=address,
-                        address2=address2,
-                        country=country,
-                        state=state,
-                        zip_code=zip_code,
-                        payment_method=payment_method,
-                        card_name=card_name,
-                        card_number_last4=card_number_last4,
-                        card_expiration=card_expiration,
-                        same_address=same_address
-                    )
-                    db.session.add(saved_payment_info)
-                    flash("Payment information saved for next time!", "success")
-                
-                db.session.commit()
-            
-            
-            
-            flash("Order placed successfully!", "success")
-            return redirect(url_for("home"))
+    if 'user_id' not in session:
+        flash("Please log in to place an order.", "warning")
+        return redirect(url_for("login"))
 
+    if request.method == "POST":
+        user_id = session['user_id']
+        payment_type = request.form.get('payment_type')
+        card_name = request.form.get('card_name')
+        card_number = request.form.get('card_number')
+        card_expiration = request.form.get('card_expiration')
+        bank_account_number = request.form.get('bank_account_number')
+        bank_routing_number = request.form.get('bank_routing_number')
+
+        # Basic validation
+        if not payment_type or payment_type not in ['credit', 'debit', 'bank']:
+            flash("Please select a valid payment type.", "danger")
+            return redirect(url_for("orders"))
+
+        if payment_type in ['credit', 'debit']:
+            if not card_name or not card_number or not card_expiration:
+                flash("Please fill in all card details.", "danger")
+                return redirect(url_for("orders"))
+            card_number_last4 = card_number[-4:]
+            payment = OrderPayment(
+                user_id=user_id,
+                payment_type=payment_type,
+                card_name=card_name,
+                card_number_last4=card_number_last4,
+                card_expiration=card_expiration
+            )
+        elif payment_type == 'bank':
+            if not bank_account_number or not bank_routing_number:
+                flash("Please fill in all bank account details.", "danger")
+                return redirect(url_for("orders"))
+            payment = OrderPayment(
+                user_id=user_id,
+                payment_type=payment_type,
+                bank_account_number=bank_account_number,
+                bank_routing_number=bank_routing_number
+            )
+        else:
+            flash("Invalid payment type.", "danger")
+            return redirect(url_for("orders"))
+
+        try:
+            db.session.add(payment)
+            db.session.commit()
+            flash("Order payment information saved! (Order logic can be extended here)", "success")
+            return redirect(url_for("orders"))
         except Exception as e:
             db.session.rollback()
-            flash(f"Error processing order: {str(e)}", "danger")
+            flash(f"Error saving payment: {str(e)}", "danger")
             return redirect(url_for("orders"))
-    
-    else:  
-        saved_info = None
-        if 'user_id' in session:
-            saved_info = SavedPaymentInfo.query.filter_by(user_id=session['user_id']).first()
-        
-        return render_template("cart.html", saved_info=saved_info)
+
+    # GET: show order form and order list
+    # You may want to fetch and pass user's orders here for display
+    orders = []  # Placeholder: fetch user's orders if implemented
+    return render_template("order.html", orders=orders)
 
 # Portfolio management routes - by Kadir Karabulut
 @app.route("/portfolio", methods=["GET", "POST"])
@@ -511,6 +466,67 @@ def signup():
         return redirect(url_for("login"))
 
     return render_template("signup.html")
+
+
+@app.route('/customers', methods=['GET'])
+def customers():
+    if 'user_id' not in session:
+        flash('Please log in to view your profile.', 'warning')
+        return redirect(url_for('login'))
+    user = User.query.get(session['user_id'])
+    payment = OrderPayment.query.filter_by(user_id=user.id).first()
+    return render_template('customers.html', user=user, payment=payment)
+
+
+@app.route('/update_profile', methods=['POST'])
+def update_profile():
+    if 'user_id' not in session:
+        flash('Please log in.', 'warning')
+        return redirect(url_for('login'))
+    user = User.query.get(session['user_id'])
+    user.full_name = request.form.get('full_name')
+    user.email = request.form.get('email')
+    password = request.form.get('password')
+    if password:
+        user.password_hash = generate_password_hash(password)
+    db.session.commit()
+    flash('Profile updated!', 'success')
+    return redirect(url_for('customers'))
+
+
+@app.route('/save_payment_info', methods=['POST'])
+def save_payment_info():
+    if 'user_id' not in session:
+        flash('Please log in.', 'warning')
+        return redirect(url_for('login'))
+    user_id = session['user_id']
+    payment_type = request.form.get('payment_type')
+    card_name = request.form.get('card_name')
+    card_number = request.form.get('card_number')
+    card_expiration = request.form.get('card_expiration')
+    bank_account_number = request.form.get('bank_account_number')
+    bank_routing_number = request.form.get('bank_routing_number')
+    payment = OrderPayment.query.filter_by(user_id=user_id).first()
+    if not payment:
+        payment = OrderPayment(user_id=user_id)
+        db.session.add(payment)
+    payment.payment_type = payment_type
+    if payment_type in ['credit', 'debit']:
+        payment.card_name = card_name
+        payment.card_number_last4 = card_number[-4:] if card_number else None
+        payment.card_expiration = card_expiration
+        payment.bank_account_number = None
+        payment.bank_routing_number = None
+    elif payment_type == 'bank':
+        payment.card_name = None
+        payment.card_number_last4 = None
+        payment.card_expiration = None
+        payment.bank_account_number = bank_account_number
+        payment.bank_routing_number = bank_routing_number
+    db.session.commit()
+    flash('Payment info saved!', 'success')
+    return redirect(url_for('customers'))
+
 
 
 with app.app_context():
