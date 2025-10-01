@@ -7,7 +7,7 @@
     <meta name="author" content="">
     <link rel="icon" href="../../../../favicon.ico">
 
-    <title>Dashboard Template for Bootstrap</title>
+    <title>Market Dashboard</title>
 
     <!-- Bootstrap core CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.0.0/dist/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
@@ -106,6 +106,29 @@
 .border-top { border-top: 1px solid #e5e5e5; }
 .border-bottom { border-bottom: 1px solid #e5e5e5; }
 
+.scroll-table {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.chart-wrapper {
+  width: 100%;
+}
+
+.pct-positive {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.pct-negative {
+  color: #dc3545;
+  font-weight: 600;
+}
+
+.card-footer-controls {
+  gap: 0.5rem;
+}
+
     </style>
   </head>
 
@@ -139,6 +162,12 @@
                 <a class="nav-link" href="/orders">
                   <span data-feather="file"></span>
                   Orders
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="/portfolio">
+                  <span data-feather="briefcase"></span>
+                  Portfolio
                 </a>
               </li>
               <li class="nav-item">
@@ -205,195 +234,221 @@
         <main role="main" class="col-md-9 ml-sm-auto col-lg-10 pt-3 px-4">
           <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
             <h1 class="h2">Dashboard</h1>
-            <div class="btn-toolbar mb-2 mb-md-0">
-              <div class="btn-group mr-2">
-                <button class="btn btn-sm btn-outline-secondary">Share</button>
-                <button class="btn btn-sm btn-outline-secondary">Export</button>
-              </div>
-              <button class="btn btn-sm btn-outline-secondary dropdown-toggle">
-                <span data-feather="calendar"></span>
-                This week
-              </button>
-            </div>
+
           </div>
 
-          <canvas class="my-4" id="myChart" width="900" height="380"></canvas>
+          <div class="chart-wrapper my-4">
+            <canvas id="averagePctChangeChart"  height="300"></canvas>
+          </div>
+          <p class="text-muted">Average percent change calculated across all available symbols per market.</p>
 
-          <h2>Section title</h2>
-          <div class="table-responsive">
-            <table class="table table-striped table-sm">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Header</th>
-                  <th>Header</th>
-                  <th>Header</th>
-                  <th>Header</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>1,001</td>
-                  <td>Lorem</td>
-                  <td>ipsum</td>
-                  <td>dolor</td>
-                  <td>sit</td>
-                </tr>
-                <tr>
-                  <td>1,002</td>
-                  <td>amet</td>
-                  <td>consectetur</td>
-                  <td>adipiscing</td>
-                  <td>elit</td>
-                </tr>
-                <tr>
-                  <td>1,003</td>
-                  <td>Integer</td>
-                  <td>nec</td>
-                  <td>odio</td>
-                  <td>Praesent</td>
-                </tr>
-                <tr>
-                  <td>1,003</td>
-                  <td>libero</td>
-                  <td>Sed</td>
-                  <td>cursus</td>
-                  <td>ante</td>
-                </tr>
-                <tr>
-                  <td>1,004</td>
-                  <td>dapibus</td>
-                  <td>diam</td>
-                  <td>Sed</td>
-                  <td>nisi</td>
-                </tr>
-                <tr>
-                  <td>1,005</td>
-                  <td>Nulla</td>
-                  <td>quis</td>
-                  <td>sem</td>
-                  <td>at</td>
-                </tr>
-                <tr>
-                  <td>1,006</td>
-                  <td>nibh</td>
-                  <td>elementum</td>
-                  <td>imperdiet</td>
-                  <td>Duis</td>
-                </tr>
-                <tr>
-                  <td>1,007</td>
-                  <td>sagittis</td>
-                  <td>ipsum</td>
-                  <td>Praesent</td>
-                  <td>mauris</td>
-                </tr>
-                <tr>
-                  <td>1,008</td>
-                  <td>Fusce</td>
-                  <td>nec</td>
-                  <td>tellus</td>
-                  <td>sed</td>
-                </tr>
-                <tr>
-                  <td>1,009</td>
-                  <td>augue</td>
-                  <td>semper</td>
-                  <td>porta</td>
-                  <td>Mauris</td>
-                </tr>
-                <tr>
-                  <td>1,010</td>
-                  <td>massa</td>
-                  <td>Vestibulum</td>
-                  <td>lacinia</td>
-                  <td>arcu</td>
-                </tr>
-                <tr>
-                  <td>1,011</td>
-                  <td>eget</td>
-                  <td>nulla</td>
-                  <td>Class</td>
-                  <td>aptent</td>
-                </tr>
-                <tr>
-                  <td>1,012</td>
-                  <td>taciti</td>
-                  <td>sociosqu</td>
-                  <td>ad</td>
-                  <td>litora</td>
-                </tr>
-                <tr>
-                  <td>1,013</td>
-                  <td>torquent</td>
-                  <td>per</td>
-                  <td>conubia</td>
-                  <td>nostra</td>
-                </tr>
-                <tr>
-                  <td>1,014</td>
-                  <td>per</td>
-                  <td>inceptos</td>
-                  <td>himenaeos</td>
-                  <td>Curabitur</td>
-                </tr>
-                <tr>
-                  <td>1,015</td>
-                  <td>sodales</td>
-                  <td>ligula</td>
-                  <td>in</td>
-                  <td>libero</td>
-                </tr>
-              </tbody>
-            </table>
+          <h2 class="mt-5">Market Symbols</h2>
+          <div class="row">
+            {% for market in markets %}
+            <div class="col-12 col-xl-4 mb-4">
+              <div class="card h-100">
+                <div class="card-header bg-light font-weight-bold">{{ market }}</div>
+                <div class="table-responsive scroll-table">
+                  <table class="table table-striped table-sm mb-0">
+                    <thead class="thead-light">
+                      <tr>
+                        <th>Symbol</th>
+                        <th>Name</th>
+                        <th class="text-right">Last Sale</th>
+                        <th class="text-right">% Change</th>
+                        <th class="text-right">Volume</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for stock in stocks_by_market.get(market, []) %}
+                      <tr>
+                        <td>{{ stock.symbol }}</td>
+                        <td>{{ stock.name }}</td>
+                        <td class="text-right">
+                          {% if stock.lastsale is not none %}
+                            {{ '%.2f'|format(stock.lastsale) }}
+                          {% else %}
+                            —
+                          {% endif %}
+                        </td>
+                        <td class="text-right {% if stock.pctchange is not none %}{{ 'pct-positive' if stock.pctchange > 0 else 'pct-negative' if stock.pctchange < 0 else '' }}{% endif %}">
+                          {% if stock.pctchange is not none %}
+                            {{ '%.3f%%'|format(stock.pctchange) }}
+                          {% else %}
+                            —
+                          {% endif %}
+                        </td>
+                        <td class="text-right">
+                          {% if stock.volume is not none %}
+                            {{ '{:,.0f}'.format(stock.volume) }}
+                          {% else %}
+                            —
+                          {% endif %}
+                        </td>
+                      </tr>
+                      {% else %}
+                      <tr>
+                        <td colspan="5" class="text-center text-muted">No data available</td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+                {% set pagination = market_pagination.get(market) %}
+                <div class="card-footer bg-white py-2">
+                  <div class="d-flex justify-content-end align-items-center flex-wrap card-footer-controls">
+                    <span class="text-muted small">Showing up to {{ pagination.per_page if pagination else 150 }} symbols per page.</span>
+                    {% if pagination %}
+                    <nav aria-label="{{ market }} pagination">
+                      <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                          {% if pagination.has_prev %}
+                          <a class="page-link" href="{{ pagination.prev_url }}" aria-label="Previous">Prev</a>
+                          {% else %}
+                          <span class="page-link" aria-disabled="true">Prev</span>
+                          {% endif %}
+                        </li>
+                        {% for link in pagination.links %}
+                          {% if link.disabled %}
+                          <li class="page-item disabled"><span class="page-link">{{ link.label }}</span></li>
+                          {% else %}
+                          <li class="page-item {% if link.active %}active{% endif %}">
+                            {% if link.active %}
+                            <span class="page-link">{{ link.label }}</span>
+                            {% else %}
+                            <a class="page-link" href="{{ link.url }}">{{ link.label }}</a>
+                            {% endif %}
+                          </li>
+                          {% endif %}
+                        {% endfor %}
+                        <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                          {% if pagination.has_next %}
+                          <a class="page-link" href="{{ pagination.next_url }}" aria-label="Next">Next</a>
+                          {% else %}
+                          <span class="page-link" aria-disabled="true">Next</span>
+                          {% endif %}
+                        </li>
+                      </ul>
+                    </nav>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
           </div>
         </main>
       </div>
     </div>
 
-    <!-- Bootstrap core JavaScript
-    ================================================== -->
-    <!-- Placed at the end of the document so the pages load faster -->
+    <!-- Bootstrap JavaScript -->
+    <!-- The javascripts load faster at the end of the document so the pages load faster :) -->
 <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/popper.js@1.12.9/dist/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.0.0/dist/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
 
-    <!-- Icons -->
+    <!-- For Icons: https://github.com/JedWatson/classnames -->
     <script src="https://unpkg.com/feather-icons/dist/feather.min.js"></script>
     <script>
       feather.replace()
     </script>
 
-    <!-- Graphs -->
+    <!-- Graphs: https://www.chartjs.org/ (https://github.com/chartjs/Chart.js) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.7.1/Chart.min.js"></script>
     <script>
-      var ctx = document.getElementById("myChart");
-      var myChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
-          datasets: [{
-            data: [15339, 21345, 18483, 24003, 23489, 24092, 12034],
-            lineTension: 0,
-            backgroundColor: 'transparent',
-            borderColor: '#007bff',
-            borderWidth: 4,
-            pointBackgroundColor: '#007bff'
-          }]
-        },
-        options: {
-          scales: {
-            yAxes: [{
-              ticks: {
-                beginAtZero: false
-              }
+      var markets = {{ markets | tojson }};
+      var avgPctChange = {{ avg_pct_change | tojson }};
+
+      var colorMap = {
+        'NASDAQ': '#001f3f',
+        'NYSE': '#006400',
+        'AMEX': '#8B0000'
+      };
+
+      var ctx = document.getElementById('averagePctChangeChart');
+      if (ctx && markets.length) {
+        new Chart(ctx, {
+          type: 'horizontalBar',
+          data: {
+            labels: markets,
+            datasets: [{
+              label: 'Average % Change',
+              data: avgPctChange,
+              backgroundColor: markets.map(function(market) {
+                return colorMap[market] || '#343a40';
+              }),
+              borderColor: markets.map(function(market) {
+                return colorMap[market] || '#343a40';
+              }),
+              borderWidth: 1
             }]
           },
-          legend: {
-            display: false,
+          options: {
+            scales: {
+              xAxes: [{
+                ticks: {
+                  beginAtZero: true,
+                  suggestedMin: -1,
+                  suggestedMax: 2,
+                  callback: function(value) {
+                    return value.toFixed(2) + '%';
+                  }
+                }
+              }],
+              yAxes: [{
+                ticks: {
+                  autoSkip: false
+                }
+              }]
+            },
+            legend: {
+              display: true
+            },
+            tooltips: {
+              callbacks: {
+                label: function(tooltipItem) {
+                  return tooltipItem.xLabel.toFixed(3) + '%';
+                }
+              }
+            },
+            animation: {
+              onComplete: function() {
+                var chartInstance = this.chart;
+                var ctx = chartInstance.ctx;
+                var dataset = this.data.datasets[0];
+                var meta = chartInstance.controller.getDatasetMeta(0);
+
+                ctx.save();
+                ctx.font = 'bold 12px ' + (Chart.defaults.global.defaultFontFamily || 'Helvetica Neue');
+                ctx.textBaseline = 'middle';
+
+                meta.data.forEach(function(bar, index) {
+                  var value = dataset.data[index];
+                  if (value === undefined || value === null) {
+                    return;
+                  }
+
+                  var label = value.toFixed(2) + '%';
+                  var color = Array.isArray(dataset.backgroundColor)
+                    ? dataset.backgroundColor[index]
+                    : dataset.backgroundColor;
+
+                  ctx.fillStyle = color;
+                  var width = ctx.measureText(label).width;
+                  var xPosition = value >= 0
+                    ? bar._model.x + 8
+                    : bar._model.x - width - 8;
+
+                  ctx.fillText(label, xPosition, bar._model.y);
+                });
+
+                ctx.restore();
+              }
+            },
+            maintainAspectRatio: false
           }
-        }
-      });
+        });
+      }
     </script>
   </body>
 </html>
