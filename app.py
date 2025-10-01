@@ -1,12 +1,12 @@
 from flask import Flask, render_template, redirect, url_for, flash, request
-from flask_bootstrap import Bootstrap5
+from flask_bootstrap import Bootstrap
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import session
 from datetime import datetime
 
 app = Flask(__name__)
-bootstrap = Bootstrap5(app)
+bootstrap = Bootstrap(app)
 
 
 # Database configuration
