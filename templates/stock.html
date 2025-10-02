@@ -44,6 +44,8 @@
   padding-top: .5rem;
   overflow-x: hidden;
   overflow-y: auto; /* Scrollable contents if viewport is shorter than content. */
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar .nav-link {
@@ -228,6 +230,13 @@
                 </a>
               </li>
             </ul>
+            {% if session.get('user_id') %}
+            <div class="mt-auto px-3 pb-3">
+              <a class="btn btn-outline-secondary btn-sm btn-block text-left" href="{{ url_for('account_settings') }}">
+                Account Settings
+              </a>
+            </div>
+            {% endif %}
           </div>
         </nav>
 

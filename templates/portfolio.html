@@ -129,14 +129,14 @@
                             <form method="post" class="d-inline">
                               <input type="hidden" name="action" value="delete">
                               <input type="hidden" name="holding_id" value="{{ holding.id }}">
-                              <button type="submit" class="btn btn-outline-danger btn-sm">Remove</button>
+                              <button type="submit" class="btn btn-outline-danger btn-sm">Sell</button>
                             </form>
                           </td>
                         </tr>
                       {% endfor %}
                     {% else %}
                       <tr>
-                        <td colspan="10" class="text-center text-muted py-4">No holdings yet. Add your first stock below.</td>
+                        <td colspan="10" class="text-center text-muted py-4">No stock holdings yet. Add your first stock below.</td>
                       </tr>
                     {% endif %}
                   </tbody>
@@ -153,7 +153,7 @@
         <div class="col-lg-3">
           <div class="card">
             <div class="card-header">
-              <h5 class="mb-0">Add Holding/Stock</h5>
+              <h5 class="mb-0">Buy Stock</h5>
             </div>
             <div class="card-body">
               <form method="post">
@@ -173,7 +173,21 @@
                   <label for="average_price">Average Price ($)</label>
                   <input type="number" step="0.01" min="0.01" class="form-control" id="average_price" name="average_price" required>
                 </div>
-                <button type="submit" class="btn btn-primary btn-block">Save Holding</button>
+                <div class="form-group">
+                  <label for="payment_method">Payment Method</label>
+                  <select class="form-control" id="payment_method" name="payment_method" {% if not payment_options %}disabled{% else %}required{% endif %}>
+                    <option value="" selected disabled>Select a payment method</option>
+                    {% for option in payment_options %}
+                      <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                {% if not payment_options %}
+                <div class="alert alert-warning" role="alert">
+                  Add a payment method in <a href="{{ url_for('account_settings') }}" class="alert-link">Account Settings</a> before buying.
+                </div>
+                {% endif %}
+                <button type="submit" class="btn btn-primary btn-block">Buy Stock</button>
               </form>
             </div>
           </div>
@@ -203,7 +217,7 @@
           fetch('/api/symbols?q=' + encodeURIComponent(symbol) + '&limit=1')
             .then(function (response) {
               if (!response.ok) {
-                throw new Error('Network response was not ok');
+                throw new Error('Warning: Network issue!');
               }
               return response.json();
             })
