@@ -234,11 +234,16 @@ def account_settings():
         email = (form.get("email") or "").strip()
         address = (form.get("address") or "").strip()
         phone_number = (form.get("phone_number") or "").strip()
-        # Validate phone number is numeric
-        if phone_number and not phone_number.isdigit():
-            errors.append("Phone number must contain only numbers.")
-        elif phone_number:
-            phone_number = int(phone_number)
+        # Validate phone number
+        if phone_number:
+            if not phone_number.isdigit():
+                errors.append("Phone number must contain only numbers.")
+            elif len(phone_number) != 10:
+                errors.append("Phone number must be exactly 10 digits.")
+            else:
+                phone_number = int(phone_number)  # Convert to integer
+        else:
+            errors.append("Phone number is required.")
 
         credit_card_number = (form.get("credit_card_number") or "").strip()
         credit_card_name = (form.get("credit_card_name") or "").strip()
@@ -374,99 +379,6 @@ def account_settings():
 
     return render_template("account_settings.html", user=user, form_data=form_data)
 
-
-
-
-@app.route("/orders", methods=["GET", "POST"])
-def orders():
-    if request.method == "POST":
-        try:
-            
-            save_info = 'save-info' in request.form
-            
-            
-            user_id = session.get('user_id')
-            
-            
-            if user_id and save_info:
-                
-                first_name = request.form.get('firstName')
-                last_name = request.form.get('lastName')
-                username = request.form.get('username')
-                email = request.form.get('email')
-                address = request.form.get('address')
-                address2 = request.form.get('address2')
-                country = request.form.get('country')
-                state = request.form.get('state')
-                zip_code = request.form.get('zip')
-                payment_method = request.form.get('paymentMethod')
-                card_name = request.form.get('cc-name')
-                card_number = request.form.get('cc-number')
-                card_expiration = request.form.get('cc-expiration')
-                card_number_last4 = card_number[-4:] if card_number else None
-                same_address = 'same-address' in request.form
-                
-                
-                existing_saved_info = SavedPaymentInfo.query.filter_by(user_id=user_id).first()
-                
-                if existing_saved_info:
-                    
-                    existing_saved_info.first_name = first_name
-                    existing_saved_info.last_name = last_name
-                    existing_saved_info.username = username
-                    existing_saved_info.email = email
-                    existing_saved_info.address = address
-                    existing_saved_info.address2 = address2
-                    existing_saved_info.country = country
-                    existing_saved_info.state = state
-                    existing_saved_info.zip_code = zip_code
-                    existing_saved_info.payment_method = payment_method
-                    existing_saved_info.card_name = card_name
-                    existing_saved_info.card_number_last4 = card_number_last4
-                    existing_saved_info.card_expiration = card_expiration
-                    existing_saved_info.same_address = same_address
-                    existing_saved_info.updated_at = datetime.utcnow()
-                    flash("Payment information updated successfully!", "info")
-                else:
-                    
-                    saved_payment_info = SavedPaymentInfo(
-                        user_id=user_id,
-                        first_name=first_name,
-                        last_name=last_name,
-                        username=username,
-                        email=email,
-                        address=address,
-                        address2=address2,
-                        country=country,
-                        state=state,
-                        zip_code=zip_code,
-                        payment_method=payment_method,
-                        card_name=card_name,
-                        card_number_last4=card_number_last4,
-                        card_expiration=card_expiration,
-                        same_address=same_address
-                    )
-                    db.session.add(saved_payment_info)
-                    flash("Payment information saved for next time!", "success")
-                
-                db.session.commit()
-            
-            
-            
-            flash("Order placed successfully!", "success")
-            return redirect(url_for("home"))
-
-        except Exception as e:
-            db.session.rollback()
-            flash(f"Error processing order: {str(e)}", "danger")
-            return redirect(url_for("orders"))
-    
-    else:  
-        saved_info = None
-        if 'user_id' in session:
-            saved_info = SavedPaymentInfo.query.filter_by(user_id=session['user_id']).first()
-        
-        return render_template("cart.html", saved_info=saved_info)
 
 # Portfolio management routes - by Kadir Karabulut
 @app.route("/portfolio", methods=["GET", "POST"])
