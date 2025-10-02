@@ -23,48 +23,16 @@ class User(db.Model):
     full_name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    phone_number = db.Column(db.String(20))
+    phone_number = db.Column(db.BigInteger)  # Store as number
     address = db.Column(db.String(255))
     credit_card_name = db.Column(db.String(100))
-    credit_card_last4 = db.Column(db.String(4))
-    credit_card_expiration = db.Column(db.String(7))
+    credit_card_last4 = db.Column(db.Integer)  # Store as number
+    credit_card_expiration = db.Column(db.String(7))  # Keep as string for MM/YYYY format
     checking_account_name = db.Column(db.String(100))
-    checking_account_last4 = db.Column(db.String(4))
-    checking_routing_number = db.Column(db.String(9))
+    checking_account_last4 = db.Column(db.Integer)  # Store as number
+    checking_routing_number = db.Column(db.Integer)  # Store as number
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
-
-
-class SavedPaymentInfo(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    
-    
-    first_name = db.Column(db.String(50), nullable=False)
-    last_name = db.Column(db.String(50), nullable=False)
-    username = db.Column(db.String(50), nullable=False)
-    email = db.Column(db.String(255), nullable=True)
-    address = db.Column(db.String(255), nullable=False)
-    address2 = db.Column(db.String(255), nullable=True)
-    country = db.Column(db.String(50), nullable=False)
-    state = db.Column(db.String(50), nullable=False)
-    zip_code = db.Column(db.String(20), nullable=False)
-    
-    
-    payment_method = db.Column(db.String(20), nullable=False)  
-    card_name = db.Column(db.String(100), nullable=True)
-    card_number_last4 = db.Column(db.String(4), nullable=True)  
-    card_expiration = db.Column(db.String(7), nullable=True)  
-    
-    
-    same_address = db.Column(db.Boolean, default=False)
-    
-    
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    
-    __table_args__ = (db.UniqueConstraint('user_id', name='unique_user_saved_payment'),)
 
 
 class PortfolioHolding(db.Model):
@@ -266,6 +234,11 @@ def account_settings():
         email = (form.get("email") or "").strip()
         address = (form.get("address") or "").strip()
         phone_number = (form.get("phone_number") or "").strip()
+        # Validate phone number is numeric
+        if phone_number and not phone_number.isdigit():
+            errors.append("Phone number must contain only numbers.")
+        elif phone_number:
+            phone_number = int(phone_number)
 
         credit_card_number = (form.get("credit_card_number") or "").strip()
         credit_card_name = (form.get("credit_card_name") or "").strip()
@@ -276,6 +249,10 @@ def account_settings():
         checking_account_name = (form.get("checking_account_name") or "").strip()
         checking_routing_number = (form.get("checking_routing_number") or "").strip()
         remove_checking_account = form.get("remove_checking_account") == "on"
+
+        # Validate numeric fields
+        if checking_routing_number and not checking_routing_number.isdigit():
+            errors.append("Routing number must contain only numbers.")
 
         current_password = form.get("current_password") or ""
         new_password = form.get("new_password") or ""

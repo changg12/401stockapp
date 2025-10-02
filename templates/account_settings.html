@@ -57,7 +57,7 @@
               </div>
               <div class="form-group">
                 <label for="phone_number">Phone Number</label>
-                <input type="tel" class="form-control" id="phone_number" name="phone_number" value="{{ form_data.get('phone_number', '') }}" required>
+                <input type="tel" class="form-control" id="phone_number" name="phone_number" value="{{ form_data.get('phone_number', '') }}" pattern="[0-9]+" title="Please enter numbers only" required>
               </div>
             </div>
           </div>
@@ -71,7 +71,7 @@
               <div class="form-row">
                 <div class="form-group col-md-4">
                   <label for="credit_card_number">Card Number</label>
-                  <input type="text" class="form-control" id="credit_card_number" name="credit_card_number" placeholder="Enter new card number">
+                  <input type="text" class="form-control" id="credit_card_number" name="credit_card_number" placeholder="Enter new card number" pattern="[0-9]+" title="Please enter numbers only">
                   {% if user.credit_card_last4 %}
                     <small class="form-text text-muted">Current card ending in {{ user.credit_card_last4 }}.</small>
                   {% endif %}
@@ -96,7 +96,7 @@
               <div class="form-row">
                 <div class="form-group col-md-4">
                   <label for="checking_account_number">Account Number</label>
-                  <input type="text" class="form-control" id="checking_account_number" name="checking_account_number" placeholder="Enter new account number">
+                  <input type="text" class="form-control" id="checking_account_number" name="checking_account_number" placeholder="Enter new account number" pattern="[0-9]+" title="Please enter numbers only">
                   {% if user.checking_account_last4 %}
                     <small class="form-text text-muted">Current account ending in {{ user.checking_account_last4 }}.</small>
                   {% endif %}
