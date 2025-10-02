@@ -44,6 +44,8 @@
   padding-top: .5rem;
   overflow-x: hidden;
   overflow-y: auto; /* Scrollable contents if viewport is shorter than content. */
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar .nav-link {
@@ -158,12 +160,7 @@
                   Dashboard <span class="sr-only">(current)</span>
                 </a>
               </li>
-              <li class="nav-item">
-                <a class="nav-link" href="/orders">
-                  <span data-feather="file"></span>
-                  Orders
-                </a>
-              </li>
+
               <li class="nav-item">
                 <a class="nav-link" href="/portfolio">
                   <span data-feather="briefcase"></span>
@@ -177,9 +174,9 @@
                 </a>
               </li>
               <li class="nav-item">
-                <a class="nav-link" href="/customers">
+                <a class="nav-link" href="{{ url_for('account_settings') }}">
                   <span data-feather="users"></span>
-                  Customers
+                  Account Settings
                 </a>
               </li>
               <li class="nav-item">
@@ -228,6 +225,13 @@
                 </a>
               </li>
             </ul>
+            {% if session.get('user_id') %}
+            <div class="mt-auto px-3 pb-3">
+              <a class="btn btn-outline-secondary btn-sm btn-block text-left" href="{{ url_for('account_settings') }}">
+                Account Settings
+              </a>
+            </div>
+            {% endif %}
           </div>
         </nav>
 
