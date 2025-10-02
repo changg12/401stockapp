@@ -19,6 +19,7 @@ app.config['SECRET_KEY'] = 'awdasdawdasdawdasdawdasd'
 db = SQLAlchemy(app)
 
 
+#User information model
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     full_name = db.Column(db.String(100), nullable=False)
@@ -29,22 +30,23 @@ class User(db.Model):
 
 
 
-# New model for storing payment info for orders
+#orders
 class OrderPayment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    payment_type = db.Column(db.String(20), nullable=False)  # 'credit', 'debit', 'bank'
+    payment_type = db.Column(db.String(20), nullable=False)
     card_name = db.Column(db.String(100), nullable=True)
     card_number_last4 = db.Column(db.String(4), nullable=True)
-    card_expiration = db.Column(db.String(7), nullable=True)
-    bank_account_number = db.Column(db.String(20), nullable=True)
-    bank_routing_number = db.Column(db.String(20), nullable=True)
+    card_expiration = db.Column(db.String(7), nullable=True) 
+    bank_account_number = db.Column(db.BigInteger, nullable=True)  
+    bank_routing_number = db.Column(db.Integer, nullable=True) 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     __table_args__ = (db.UniqueConstraint('user_id', 'card_number_last4', 'bank_account_number', name='unique_user_payment'),)
 
 
+# Portfolio management model - by Kadir Karabulut
 class PortfolioHolding(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
@@ -59,7 +61,6 @@ class PortfolioHolding(db.Model):
     )
 
 # Stock symbols data from https://github.com/rreichel3/US-Stock-Symbols/tree/main
-# Please use your own database and import the flask_db_stock_symbols.sql file for testing
 class StockSymbol(db.Model):
     __tablename__ = 'stock_symbols'
     __table_args__ = {'extend_existing': True}
@@ -241,7 +242,7 @@ def orders():
         bank_account_number = request.form.get('bank_account_number')
         bank_routing_number = request.form.get('bank_routing_number')
 
-        # Basic validation
+        
         if not payment_type or payment_type not in ['credit', 'debit', 'bank']:
             flash("Please select a valid payment type.", "danger")
             return redirect(url_for("orders"))
@@ -282,9 +283,9 @@ def orders():
             flash(f"Error saving payment: {str(e)}", "danger")
             return redirect(url_for("orders"))
 
-    # GET: show order form and order list
-    # You may want to fetch and pass user's orders here for display
-    orders = []  # Placeholder: fetch user's orders if implemented
+    
+    
+    orders = []  
     return render_template("order.html", orders=orders)
 
 # Portfolio management routes - by Kadir Karabulut
@@ -499,32 +500,73 @@ def save_payment_info():
     if 'user_id' not in session:
         flash('Please log in.', 'warning')
         return redirect(url_for('login'))
-    user_id = session['user_id']
-    payment_type = request.form.get('payment_type')
-    card_name = request.form.get('card_name')
-    card_number = request.form.get('card_number')
-    card_expiration = request.form.get('card_expiration')
-    bank_account_number = request.form.get('bank_account_number')
-    bank_routing_number = request.form.get('bank_routing_number')
-    payment = OrderPayment.query.filter_by(user_id=user_id).first()
-    if not payment:
-        payment = OrderPayment(user_id=user_id)
-        db.session.add(payment)
-    payment.payment_type = payment_type
-    if payment_type in ['credit', 'debit']:
-        payment.card_name = card_name
-        payment.card_number_last4 = card_number[-4:] if card_number else None
-        payment.card_expiration = card_expiration
-        payment.bank_account_number = None
-        payment.bank_routing_number = None
-    elif payment_type == 'bank':
-        payment.card_name = None
-        payment.card_number_last4 = None
-        payment.card_expiration = None
-        payment.bank_account_number = bank_account_number
-        payment.bank_routing_number = bank_routing_number
-    db.session.commit()
-    flash('Payment info saved!', 'success')
+    
+    #Alert/leave as debugging for now testing in progress
+    debug_info = f"Form data received: {request.form.to_dict()}\nUser ID: {session.get('user_id')}"
+    flash(debug_info, 'info')
+    
+    try:
+        user_id = session['user_id']
+        payment_type = request.form.get('payment_type')
+        card_name = request.form.get('card_name')
+        card_number = request.form.get('card_number')
+        card_expiration = request.form.get('card_expiration')
+        bank_account_number = request.form.get('bank_account_number')
+        bank_routing_number = request.form.get('bank_routing_number')
+        
+        #Aler/leave as debugging for now testing in progress
+        flash(f"Processing payment info - Type: {payment_type}", 'info')
+
+        payment = OrderPayment.query.filter_by(user_id=user_id).first()
+        if not payment:
+            payment = OrderPayment(user_id=user_id)
+            db.session.add(payment)
+            flash("Creating new payment record", 'info')
+        else:
+            flash("Updating existing payment record", 'info')
+
+        payment.payment_type = payment_type
+        if payment_type in ['credit', 'debit']:
+            payment.card_name = card_name
+            payment.card_number_last4 = card_number[-4:] if card_number else None
+            flash(f"Processing card details - Name: {card_name}, Last4: {card_number[-4:] if card_number else 'None'}", 'info')
+            
+            if card_expiration:
+                month, year = card_expiration.split('/')
+                year = int(year)
+                month = int(month)
+                flash(f"Processing expiration date - Month: {month}, Year: {year}", 'info')
+                
+                # Validate expiration date
+                current_year = datetime.now().year
+                if year < current_year or year > current_year + 20:
+                    raise ValueError("Card expiration year must be between current year and 20 years in the future")
+                if month < 1 or month > 12:
+                    raise ValueError("Invalid month in expiration date")
+                    
+                #MM/YYYY format
+                payment.card_expiration = f"{month:02d}/{year}"
+            payment.bank_account_number = None
+            payment.bank_routing_number = None
+        elif payment_type == 'bank':
+            payment.card_name = None
+            payment.card_number_last4 = None
+            payment.card_expiration = None
+            
+            if bank_account_number:
+                payment.bank_account_number = int(bank_account_number.replace('-', '').replace(' ', ''))
+            if bank_routing_number:
+                payment.bank_routing_number = int(bank_routing_number.replace('-', '').replace(' ', ''))
+
+        db.session.commit()
+        flash('Payment info saved!', 'success')
+    except ValueError as e:
+        db.session.rollback()
+        flash('Invalid input format. Please check your entries.', 'danger')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error saving payment information: {str(e)}', 'danger')
+    
     return redirect(url_for('customers'))
 
 
