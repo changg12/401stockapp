@@ -10,7 +10,6 @@ from sqlalchemy import func
 app = Flask(__name__)
 bootstrap = Bootstrap(app)
 
-
 # Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:password@localhost/flask_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -19,34 +18,23 @@ app.config['SECRET_KEY'] = 'awdasdawdasdawdasdawdasd'
 db = SQLAlchemy(app)
 
 
-#User information model
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     full_name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
+    phone_number = db.Column(db.BigInteger)  # Store as number
+    address = db.Column(db.String(255))
+    credit_card_name = db.Column(db.String(100))
+    credit_card_last4 = db.Column(db.Integer)  # Store as number
+    credit_card_expiration = db.Column(db.String(7))  # Keep as string for MM/YYYY format
+    checking_account_name = db.Column(db.String(100))
+    checking_account_last4 = db.Column(db.Integer)  # Store as number
+    checking_routing_number = db.Column(db.Integer)  # Store as number
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
 
 
-
-#orders
-class OrderPayment(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    payment_type = db.Column(db.String(20), nullable=False)
-    card_name = db.Column(db.String(100), nullable=True)
-    card_number_last4 = db.Column(db.String(4), nullable=True)
-    card_expiration = db.Column(db.String(7), nullable=True) 
-    bank_account_number = db.Column(db.BigInteger, nullable=True)  
-    bank_routing_number = db.Column(db.Integer, nullable=True) 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    __table_args__ = (db.UniqueConstraint('user_id', 'card_number_last4', 'bank_account_number', name='unique_user_payment'),)
-
-
-# Portfolio management model - by Kadir Karabulut
 class PortfolioHolding(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
@@ -61,6 +49,7 @@ class PortfolioHolding(db.Model):
     )
 
 # Stock symbols data from https://github.com/rreichel3/US-Stock-Symbols/tree/main
+# Please use your own database and import the flask_db_stock_symbols.sql file for testing
 class StockSymbol(db.Model):
     __tablename__ = 'stock_symbols'
     __table_args__ = {'extend_existing': True}
@@ -226,67 +215,170 @@ def logout():
 
 
 
-
-@app.route("/orders", methods=["GET", "POST"])
-def orders():
+@app.route("/account/settings", methods=["GET", "POST"])
+def account_settings():
     if 'user_id' not in session:
-        flash("Please log in to place an order.", "warning")
+        flash("Please log in to access account settings.", "warning")
+        return redirect(url_for("login"))
+
+    user = User.query.get(session['user_id'])
+
+    if not user:
+        session.pop('user_id', None)
+        session.pop('user_name', None)
+        flash("User not found. Please sign in again.", "danger")
         return redirect(url_for("login"))
 
     if request.method == "POST":
-        user_id = session['user_id']
-        payment_type = request.form.get('payment_type')
-        card_name = request.form.get('card_name')
-        card_number = request.form.get('card_number')
-        card_expiration = request.form.get('card_expiration')
-        bank_account_number = request.form.get('bank_account_number')
-        bank_routing_number = request.form.get('bank_routing_number')
-
-        
-        if not payment_type or payment_type not in ['credit', 'debit', 'bank']:
-            flash("Please select a valid payment type.", "danger")
-            return redirect(url_for("orders"))
-
-        if payment_type in ['credit', 'debit']:
-            if not card_name or not card_number or not card_expiration:
-                flash("Please fill in all card details.", "danger")
-                return redirect(url_for("orders"))
-            card_number_last4 = card_number[-4:]
-            payment = OrderPayment(
-                user_id=user_id,
-                payment_type=payment_type,
-                card_name=card_name,
-                card_number_last4=card_number_last4,
-                card_expiration=card_expiration
-            )
-        elif payment_type == 'bank':
-            if not bank_account_number or not bank_routing_number:
-                flash("Please fill in all bank account details.", "danger")
-                return redirect(url_for("orders"))
-            payment = OrderPayment(
-                user_id=user_id,
-                payment_type=payment_type,
-                bank_account_number=bank_account_number,
-                bank_routing_number=bank_routing_number
-            )
+        form = request.form
+        email = (form.get("email") or "").strip()
+        address = (form.get("address") or "").strip()
+        phone_number = (form.get("phone_number") or "").strip()
+        # Validate phone number
+        if phone_number:
+            if not phone_number.isdigit():
+                errors.append("Phone number must contain only numbers.")
+            elif len(phone_number) != 10:
+                errors.append("Phone number must be exactly 10 digits.")
+            else:
+                phone_number = int(phone_number)  # Convert to integer
         else:
-            flash("Invalid payment type.", "danger")
-            return redirect(url_for("orders"))
+            errors.append("Phone number is required.")
 
-        try:
-            db.session.add(payment)
-            db.session.commit()
-            flash("Order payment information saved! (Order logic can be extended here)", "success")
-            return redirect(url_for("orders"))
-        except Exception as e:
-            db.session.rollback()
-            flash(f"Error saving payment: {str(e)}", "danger")
-            return redirect(url_for("orders"))
+        credit_card_number = (form.get("credit_card_number") or "").strip()
+        credit_card_name = (form.get("credit_card_name") or "").strip()
+        credit_card_expiration = (form.get("credit_card_expiration") or "").strip()
+        remove_credit_card = form.get("remove_credit_card") == "on"
 
-    
-    
-    orders = []  
-    return render_template("order.html", orders=orders)
+        checking_account_number = (form.get("checking_account_number") or "").strip()
+        checking_account_name = (form.get("checking_account_name") or "").strip()
+        checking_routing_number = (form.get("checking_routing_number") or "").strip()
+        remove_checking_account = form.get("remove_checking_account") == "on"
+
+        # Validate numeric fields
+        if checking_routing_number and not checking_routing_number.isdigit():
+            errors.append("Routing number must contain only numbers.")
+
+        current_password = form.get("current_password") or ""
+        new_password = form.get("new_password") or ""
+        confirm_password = form.get("confirm_password") or ""
+
+        errors = []
+
+        if not email:
+            errors.append("Email is required.")
+
+        if email and email != user.email:
+            existing_user = User.query.filter(User.email == email, User.id != user.id).first()
+            if existing_user:
+                errors.append("That email address is already in use.")
+
+        if not address:
+            errors.append("Address is required.")
+
+        if not phone_number:
+            errors.append("Phone number is required.")
+
+        # Prepare payment data updates
+        new_credit_last4 = user.credit_card_last4
+        new_credit_name = user.credit_card_name
+        new_credit_expiration = user.credit_card_expiration
+
+        new_checking_last4 = user.checking_account_last4
+        new_checking_name = user.checking_account_name
+        new_checking_routing = user.checking_routing_number
+
+        if remove_credit_card:
+            new_credit_last4 = None
+            new_credit_name = None
+            new_credit_expiration = None
+
+        if remove_checking_account:
+            new_checking_last4 = None
+            new_checking_name = None
+            new_checking_routing = None
+
+        if credit_card_number:
+            digits_only = ''.join(ch for ch in credit_card_number if ch.isdigit())
+            if len(digits_only) < 4:
+                errors.append("Credit card number must include at least four digits.")
+            else:
+                new_credit_last4 = digits_only[-4:]
+                new_credit_name = credit_card_name or user.full_name
+                new_credit_expiration = credit_card_expiration or None
+
+        if checking_account_number:
+            acct_digits = ''.join(ch for ch in checking_account_number if ch.isdigit())
+            if len(acct_digits) < 4:
+                errors.append("Checking account number must include at least four digits.")
+            else:
+                new_checking_last4 = acct_digits[-4:]
+                new_checking_name = checking_account_name or user.full_name
+
+            routing_digits = ''.join(ch for ch in checking_routing_number if ch.isdigit())
+            if routing_digits and len(routing_digits) != 9:
+                errors.append("Routing number must be nine digits.")
+            else:
+                new_checking_routing = routing_digits or None
+        elif checking_routing_number:
+            # Routing number without account doesn't make sense
+            errors.append("Provide a checking account number when supplying a routing number.")
+
+        if not (new_credit_last4 or new_checking_last4):
+            errors.append("At least one payment method (credit card or checking account) is required.")
+
+        password_change_requested = any([current_password, new_password, confirm_password])
+
+        if password_change_requested:
+            if not current_password:
+                errors.append("Current password is required to change password.")
+            elif not check_password_hash(user.password_hash, current_password):
+                errors.append("Current password is incorrect.")
+
+            if not new_password:
+                errors.append("New password is required.")
+            elif len(new_password) < 8:
+                errors.append("New password must be at least eight characters long.")
+
+            if new_password != confirm_password:
+                errors.append("New password and confirmation do not match.")
+
+        if errors:
+            for message in errors:
+                flash(message, "danger")
+            return render_template("account_settings.html", user=user, form_data=form)
+
+        user.email = email
+        user.address = address
+        user.phone_number = phone_number
+        user.credit_card_last4 = new_credit_last4
+        user.credit_card_name = new_credit_name
+        user.credit_card_expiration = new_credit_expiration
+        user.checking_account_last4 = new_checking_last4
+        user.checking_account_name = new_checking_name
+        user.checking_routing_number = new_checking_routing
+
+        if password_change_requested and not errors:
+            user.password_hash = generate_password_hash(new_password)
+            flash("Password updated successfully.", "success")
+
+        db.session.commit()
+
+        flash("Account settings updated.", "success")
+        return redirect(url_for("account_settings"))
+
+    form_data = {
+        "email": user.email or "",
+        "address": user.address or "",
+        "phone_number": user.phone_number or "",
+        "credit_card_name": user.credit_card_name or "",
+        "credit_card_expiration": user.credit_card_expiration or "",
+        "checking_account_name": user.checking_account_name or "",
+        "checking_routing_number": user.checking_routing_number or "",
+    }
+
+    return render_template("account_settings.html", user=user, form_data=form_data)
+
 
 # Portfolio management routes - by Kadir Karabulut
 @app.route("/portfolio", methods=["GET", "POST"])
@@ -296,6 +388,31 @@ def portfolio():
         return redirect(url_for("login"))
 
     user_id = session['user_id']
+    user = User.query.get(user_id)
+
+    if not user:
+        session.pop('user_id', None)
+        session.pop('user_name', None)
+        flash("User not found. Please sign in again.", "danger")
+        return redirect(url_for("login"))
+
+    payment_options = []
+
+    if user.credit_card_last4:
+        card_name = user.credit_card_name or "Credit Card"
+        payment_options.append({
+            "value": "credit_card",
+            "label": f"{card_name} ending in {user.credit_card_last4}",
+        })
+
+    if user.checking_account_last4:
+        account_name = user.checking_account_name or "Checking Account"
+        payment_options.append({
+            "value": "checking_account",
+            "label": f"{account_name} ending in {user.checking_account_last4}",
+        })
+
+    payment_option_lookup = {option["value"]: option["label"] for option in payment_options}
 
     if request.method == "POST":
         action = request.form.get("action", "add")
@@ -305,25 +422,36 @@ def portfolio():
             try:
                 holding_id = int(holding_id)
             except (TypeError, ValueError):
-                flash("Invalid request for deletion.", "danger")
+                flash("Invalid request for sell.", "danger")
                 return redirect(url_for("portfolio"))
 
             holding = PortfolioHolding.query.filter_by(id=holding_id, user_id=user_id).first()
             if not holding:
-                flash("Holding not found.", "warning")
+                flash("Stock holding not found.", "warning")
                 return redirect(url_for("portfolio"))
 
             db.session.delete(holding)
             db.session.commit()
-            flash(f"Removed {holding.symbol} from your portfolio.", "info")
+            flash(f"Sold {holding.symbol}. Deposited to your credit card or checking account.", "info")
             return redirect(url_for("portfolio"))
+
+        if not payment_options:
+            flash("Please add a payment method in Account Settings before buying.", "warning")
+            return redirect(url_for("portfolio"))
+
+        selected_payment_method = (request.form.get("payment_method") or "").strip()
+        if selected_payment_method not in payment_option_lookup:
+            flash("Select a saved payment method before buying.", "warning")
+            return redirect(url_for("portfolio"))
+
+        selected_payment_label = payment_option_lookup[selected_payment_method]
 
         symbol = (request.form.get("symbol") or "").upper().strip()
         shares = request.form.get("shares")
         average_price = request.form.get("average_price")
 
         if not symbol or not shares or not average_price:
-            flash("All fields are required to add a holding.", "danger")
+            flash("All fields are required to add a stock holding.", "danger")
         else:
             try:
                 shares_value = float(shares)
@@ -336,13 +464,12 @@ def portfolio():
 
                 if holding:
                     total_shares = holding.shares + shares_value
-                    # Weighted average price for additional shares
                     holding.average_price = (
                         (holding.shares * holding.average_price) + (shares_value * price_value)
                     ) / total_shares
                     holding.shares = total_shares
                     holding.updated_at = datetime.utcnow()
-                    flash(f"Updated holding for {symbol}.", "info")
+                    flash(f"Updated stock holding for {symbol} using {selected_payment_label}.", "info")
                 else:
                     holding = PortfolioHolding(
                         user_id=user_id,
@@ -351,7 +478,7 @@ def portfolio():
                         average_price=price_value,
                     )
                     db.session.add(holding)
-                    flash(f"Added {symbol} to your portfolio.", "success")
+                    flash(f"Added {symbol} to your portfolio using {selected_payment_label}.", "success")
 
                 db.session.commit()
             except ValueError:
@@ -359,7 +486,7 @@ def portfolio():
                 flash("Shares and price must be positive numbers.", "danger")
             except Exception as e:
                 db.session.rollback()
-                flash(f"Unable to save holding: {str(e)}", "danger")
+                flash(f"Unable to save stock holding: {str(e)}", "danger")
 
         return redirect(url_for("portfolio"))
 
@@ -418,6 +545,7 @@ def portfolio():
         total_cost_basis=total_cost_basis,
         total_market_value=total_market_value,
         unrealized_pl=unrealized_pl,
+        payment_options=payment_options,
     )
 # End of portfolio management routes
 
@@ -467,108 +595,6 @@ def signup():
         return redirect(url_for("login"))
 
     return render_template("signup.html")
-
-
-@app.route('/customers', methods=['GET'])
-def customers():
-    if 'user_id' not in session:
-        flash('Please log in to view your profile.', 'warning')
-        return redirect(url_for('login'))
-    user = User.query.get(session['user_id'])
-    payment = OrderPayment.query.filter_by(user_id=user.id).first()
-    return render_template('customers.html', user=user, payment=payment)
-
-
-@app.route('/update_profile', methods=['POST'])
-def update_profile():
-    if 'user_id' not in session:
-        flash('Please log in.', 'warning')
-        return redirect(url_for('login'))
-    user = User.query.get(session['user_id'])
-    user.full_name = request.form.get('full_name')
-    user.email = request.form.get('email')
-    password = request.form.get('password')
-    if password:
-        user.password_hash = generate_password_hash(password)
-    db.session.commit()
-    flash('Profile updated!', 'success')
-    return redirect(url_for('customers'))
-
-
-@app.route('/save_payment_info', methods=['POST'])
-def save_payment_info():
-    if 'user_id' not in session:
-        flash('Please log in.', 'warning')
-        return redirect(url_for('login'))
-    
-    #Alert/leave as debugging for now testing in progress
-    debug_info = f"Form data received: {request.form.to_dict()}\nUser ID: {session.get('user_id')}"
-    flash(debug_info, 'info')
-    
-    try:
-        user_id = session['user_id']
-        payment_type = request.form.get('payment_type')
-        card_name = request.form.get('card_name')
-        card_number = request.form.get('card_number')
-        card_expiration = request.form.get('card_expiration')
-        bank_account_number = request.form.get('bank_account_number')
-        bank_routing_number = request.form.get('bank_routing_number')
-        
-        #Alert/leave as debugging for now testing in progress
-        flash(f"Processing payment info - Type: {payment_type}", 'info')
-
-        payment = OrderPayment.query.filter_by(user_id=user_id).first()
-        if not payment:
-            payment = OrderPayment(user_id=user_id)
-            db.session.add(payment)
-            flash("Creating new payment record", 'info')
-        else:
-            flash("Updating existing payment record", 'info')
-
-        payment.payment_type = payment_type
-        if payment_type in ['credit', 'debit']:
-            payment.card_name = card_name
-            payment.card_number_last4 = card_number[-4:] if card_number else None
-            flash(f"Processing card details - Name: {card_name}, Last4: {card_number[-4:] if card_number else 'None'}", 'info')
-            
-            if card_expiration:
-                month, year = card_expiration.split('/')
-                year = int(year)
-                month = int(month)
-                flash(f"Processing expiration date - Month: {month}, Year: {year}", 'info')
-                
-                #Validate expiration date
-                current_year = datetime.now().year
-                if year < current_year or year > current_year + 20:
-                    raise ValueError("Card expiration year must be between current year and 20 years in the future")
-                if month < 1 or month > 12:
-                    raise ValueError("Invalid month in expiration date")
-                    
-                #MM/YYYY format
-                payment.card_expiration = f"{month:02d}/{year}"
-            payment.bank_account_number = None
-            payment.bank_routing_number = None
-        elif payment_type == 'bank':
-            payment.card_name = None
-            payment.card_number_last4 = None
-            payment.card_expiration = None
-            
-            if bank_account_number:
-                payment.bank_account_number = int(bank_account_number.replace('-', '').replace(' ', ''))
-            if bank_routing_number:
-                payment.bank_routing_number = int(bank_routing_number.replace('-', '').replace(' ', ''))
-
-        db.session.commit()
-        flash('Payment info saved!', 'success')
-    except ValueError as e:
-        db.session.rollback()
-        flash('Invalid input format. Please check your entries.', 'danger')
-    except Exception as e:
-        db.session.rollback()
-        flash(f'Error saving payment information: {str(e)}', 'danger')
-    
-    return redirect(url_for('customers'))
-
 
 
 with app.app_context():
