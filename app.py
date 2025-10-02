@@ -514,7 +514,7 @@ def save_payment_info():
         bank_account_number = request.form.get('bank_account_number')
         bank_routing_number = request.form.get('bank_routing_number')
         
-        #Aler/leave as debugging for now testing in progress
+        #Alert/leave as debugging for now testing in progress
         flash(f"Processing payment info - Type: {payment_type}", 'info')
 
         payment = OrderPayment.query.filter_by(user_id=user_id).first()
@@ -537,7 +537,7 @@ def save_payment_info():
                 month = int(month)
                 flash(f"Processing expiration date - Month: {month}, Year: {year}", 'info')
                 
-                # Validate expiration date
+                #Validate expiration date
                 current_year = datetime.now().year
                 if year < current_year or year > current_year + 20:
                     raise ValueError("Card expiration year must be between current year and 20 years in the future")
