@@ -6,7 +6,7 @@ from flask import session
 from datetime import datetime
 from math import ceil
 from sqlalchemy import func
-
+from flask import session
 app = Flask(__name__)
 bootstrap = Bootstrap(app)
 
@@ -23,6 +23,7 @@ class User(db.Model):
     full_name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
+    is_admin = db.Column(db.Boolean, default=False)  # Add this line
     phone_number = db.Column(db.BigInteger)  # Store as number
     address = db.Column(db.String(255))
     credit_card_name = db.Column(db.String(100))
@@ -597,8 +598,46 @@ def signup():
     return render_template("signup.html")
 
 
+@app.route("/admin")
+def admin_dashboard():
+    if 'user_id' not in session:
+        flash("Please log in to access admin dashboard.", "warning")
+        return redirect(url_for("login"))
+
+    user = User.query.get(session['user_id'])
+    if not user or not user.is_admin:
+        flash("You don't have permission to access the admin dashboard.", "danger")
+        return redirect(url_for("home"))
+
+    users = User.query.all()
+    holdings = PortfolioHolding.query.all()
+    stock_count = StockSymbol.query.count()
+
+    return render_template(
+        "admin_dashboard.html",
+        users=users,
+        holdings=holdings,
+        stock_count=stock_count
+    )
+
+
+#create an admin user
+def create_admin_user():
+    admin = User.query.filter_by(email='admin@admin.com').first()
+    if not admin:
+        admin = User(
+            full_name='Admin User',
+            email='admin@admin.com',
+            password_hash=generate_password_hash('admin123'),
+            is_admin=True
+        )
+        db.session.add(admin)
+        db.session.commit()
+        print("Admin user created")
+
 with app.app_context():
     db.create_all()
+    create_admin_user()
 
 if __name__ == "__main__":
     app.run(debug=True)
