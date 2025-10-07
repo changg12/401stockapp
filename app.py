@@ -621,7 +621,7 @@ def admin_dashboard():
     )
 
 
-#create an admin user
+#create admin user/this is to prevent user being able to create admin account
 def create_admin_user():
     admin = User.query.filter_by(email='admin@admin.com').first()
     if not admin:
