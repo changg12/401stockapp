@@ -1,5 +1,5 @@
 from flask import Flask, render_template, redirect, url_for, flash, request, jsonify, abort
-from flask_bootstrap5 import Bootstrap
+from flask_bootstrap import Bootstrap
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import session
@@ -12,7 +12,7 @@ app = Flask(__name__)
 bootstrap = Bootstrap(app)
 
 # Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:Password@localhost/flask_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:password@localhost/flask_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'awdasdawdasdawdasdawdasd'
 
