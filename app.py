@@ -1,11 +1,12 @@
-from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
-from flask_bootstrap import Bootstrap
+from flask import Flask, render_template, redirect, url_for, flash, request, jsonify, abort
+from flask_bootstrap5 import Bootstrap
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import session
-from datetime import datetime
+from datetime import datetime, date, time, timedelta
 from math import ceil
 from sqlalchemy import func
+import pytz
 
 app = Flask(__name__)
 bootstrap = Bootstrap(app)
@@ -18,9 +19,16 @@ app.config['SECRET_KEY'] = 'awdasdawdasdawdasdawdasd'
 db = SQLAlchemy(app)
 
 
+MARKET_TZ = pytz.timezone("America/New_York")
+DEFAULT_MARKET_OPEN_TIME = time(9, 30)
+DEFAULT_MARKET_CLOSE_TIME = time(16, 0)
+
+
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     full_name = db.Column(db.String(100), nullable=False)
+    first_name = db.Column(db.String(50))
+    last_name = db.Column(db.String(50))
     email = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     phone_number = db.Column(db.String(20))
@@ -31,6 +39,7 @@ class User(db.Model):
     checking_account_name = db.Column(db.String(100))
     checking_account_last4 = db.Column(db.String(4))
     checking_routing_number = db.Column(db.String(9))
+    is_admin = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
 
@@ -79,6 +88,224 @@ class PortfolioHolding(db.Model):
     __table_args__ = (
         db.UniqueConstraint('user_id', 'symbol', name='unique_symbol_per_user'),
     )
+
+
+class Trade(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    symbol = db.Column(db.String(10), nullable=False)
+    shares = db.Column(db.Float, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    total_value = db.Column(db.Float, nullable=False)
+    transaction_type = db.Column(db.String(10), nullable=False)  # BUY or SELL
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UserLoginLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    login_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    logout_at = db.Column(db.DateTime)
+
+
+class MarketScheduleOverride(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, unique=True, nullable=False)
+    is_closed = db.Column(db.Boolean, default=False, nullable=False)
+    open_time = db.Column(db.Time)
+    close_time = db.Column(db.Time)
+    note = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+def get_current_user():
+    user_id = session.get('user_id')
+    if not user_id:
+        return None
+    return User.query.get(user_id)
+
+
+def require_admin_access():
+    user = get_current_user()
+    if not user:
+        flash("Please log in to access the admin portal.", "warning")
+        return False, redirect(url_for("login"))
+
+    if not user.is_admin:
+        flash("Administrator rights are required to view this page.", "danger")
+        return False, redirect(url_for("home"))
+
+    return True, user
+
+
+def get_market_schedule_for_day(target_date):
+    override = MarketScheduleOverride.query.filter_by(date=target_date).first()
+
+    schedule = {
+        "date": target_date,
+        "is_closed": False,
+        "open_time": DEFAULT_MARKET_OPEN_TIME,
+        "close_time": DEFAULT_MARKET_CLOSE_TIME,
+        "note": None,
+        "override": override,
+    }
+
+    # Weekend default closure unless an override opens the market explicitly
+    if target_date.weekday() >= 5:
+        schedule["is_closed"] = True
+        schedule["note"] = "Weekend closure"
+
+    if override:
+        schedule["is_closed"] = bool(override.is_closed)
+        if override.note:
+            schedule["note"] = override.note
+
+        if not override.is_closed:
+            if override.open_time:
+                schedule["open_time"] = override.open_time
+            if override.close_time:
+                schedule["close_time"] = override.close_time
+            if not override.note:
+                schedule["note"] = None
+        else:
+            schedule["open_time"] = override.open_time
+            schedule["close_time"] = override.close_time
+
+    return schedule
+
+
+def find_next_opening(start_date, reference_dt=None):
+    # Search upcoming days for an open market session
+    reference_dt = reference_dt or datetime.now(MARKET_TZ)
+    for offset in range(0, 14):
+        day = start_date + timedelta(days=offset)
+        schedule = get_market_schedule_for_day(day)
+        if schedule["is_closed"]:
+            continue
+
+        open_time = schedule.get("open_time") or DEFAULT_MARKET_OPEN_TIME
+        open_dt = MARKET_TZ.localize(datetime.combine(day, open_time))
+        if open_dt >= reference_dt:
+            return open_dt
+
+    return None
+
+
+def get_market_status(reference=None):
+    now = reference or datetime.now(MARKET_TZ)
+    today = now.date()
+
+    schedule = get_market_schedule_for_day(today)
+
+    status = {
+        "is_open": False,
+        "message": None,
+        "opens_at": None,
+        "closes_at": None,
+        "next_open": None,
+        "note": schedule.get("note"),
+    }
+
+    if schedule["is_closed"] or not schedule.get("open_time") or not schedule.get("close_time"):
+        note = schedule.get("note")
+        if note:
+            status["message"] = f"{note}. Trading is currently disabled."
+        else:
+            status["message"] = "Markets are closed today. Trading is currently disabled."
+        status["next_open"] = find_next_opening(today + timedelta(days=1), reference_dt=now)
+        return status
+
+    open_time = schedule["open_time"] or DEFAULT_MARKET_OPEN_TIME
+    close_time = schedule["close_time"] or DEFAULT_MARKET_CLOSE_TIME
+
+    open_dt = MARKET_TZ.localize(datetime.combine(today, open_time))
+    close_dt = MARKET_TZ.localize(datetime.combine(today, close_time))
+
+    status["opens_at"] = open_dt
+    status["closes_at"] = close_dt
+
+    if open_dt <= now <= close_dt:
+        status["is_open"] = True
+        status["message"] = None
+        status["next_open"] = open_dt
+        return status
+
+    if now < open_dt:
+        status["message"] = "Markets are not open yet. Trading remains disabled until the session begins."
+        status["next_open"] = open_dt
+    else:
+        status["message"] = "Markets are closed for the day. Trading will resume next session."
+        status["next_open"] = find_next_opening(today + timedelta(days=1), reference_dt=now)
+
+    return status
+
+
+def format_market_notice(status):
+    message = status.get("message") or "Markets are currently closed. Trading is disabled."
+    next_open = status.get("next_open")
+    if next_open:
+        next_label = next_open.strftime('%A, %B %d at %I:%M %p %Z').lstrip('0')
+        message = f"{message} Next session begins {next_label}."
+    return message
+
+
+def build_customer_activity_summary():
+    users = User.query.order_by(User.full_name.asc()).all()
+    if not users:
+        return []
+
+    now = datetime.utcnow()
+    year_start = datetime(now.year, 1, 1)
+    month_start = datetime(now.year, now.month, 1)
+
+    from calendar import monthrange
+
+    days_in_month = monthrange(now.year, now.month)[1]
+
+    # Pre-seed metrics for each user to ensure deterministic ordering
+    metrics = {
+        user.id: {
+            "display_name": user.full_name or user.email,
+            "year_buy_total": 0.0,
+            "year_sell_total": 0.0,
+            "month_buy_total": 0.0,
+            "month_sell_total": 0.0,
+            "month_buy_daily_avg": 0.0,
+            "month_sell_daily_avg": 0.0,
+            "month_profit_loss": 0.0,
+        }
+        for user in users
+    }
+
+    # Fetch all trades from the start of the year to avoid multiple queries
+    yearly_trades = Trade.query.filter(Trade.created_at >= year_start).all()
+
+    for trade in yearly_trades:
+        user_metrics = metrics.get(trade.user_id)
+        if not user_metrics:
+            continue
+
+        is_buy = (trade.transaction_type or "").upper() == "BUY"
+
+        if is_buy:
+            user_metrics["year_buy_total"] += float(trade.total_value or 0)
+        else:
+            user_metrics["year_sell_total"] += float(trade.total_value or 0)
+
+        if trade.created_at >= month_start:
+            if is_buy:
+                user_metrics["month_buy_total"] += float(trade.total_value or 0)
+            else:
+                user_metrics["month_sell_total"] += float(trade.total_value or 0)
+
+    for data in metrics.values():
+        if days_in_month:
+            data["month_buy_daily_avg"] = data["month_buy_total"] / days_in_month
+            data["month_sell_daily_avg"] = data["month_sell_total"] / days_in_month
+        data["month_profit_loss"] = data["month_sell_total"] - data["month_buy_total"]
+
+    return list(metrics.values())
 
 # Stock symbols data from https://github.com/rreichel3/US-Stock-Symbols/tree/main
 # Please use your own database and import the flask_db_stock_symbols.sql file for testing
@@ -228,7 +455,13 @@ def login():
 
         if user and check_password_hash(user.password_hash, password):
             session['user_id'] = user.id
-            session['user_name'] = user.full_name 
+            session['user_name'] = user.full_name
+            session['is_admin'] = bool(user.is_admin)
+
+            login_log = UserLoginLog(user_id=user.id)
+            db.session.add(login_log)
+            db.session.commit()
+
             flash("Login successful!", "success")
             return redirect(url_for("home"))
         else:
@@ -240,8 +473,21 @@ def login():
 
 @app.route("/logout")
 def logout():
+    user_id = session.get('user_id')
+    if user_id:
+        latest_log = (
+            UserLoginLog.query
+            .filter_by(user_id=user_id, logout_at=None)
+            .order_by(UserLoginLog.login_at.desc())
+            .first()
+        )
+        if latest_log:
+            latest_log.logout_at = datetime.utcnow()
+            db.session.commit()
+
     session.pop('user_id', None)
     session.pop('user_name', None)
+    session.pop('is_admin', None)
     flash("You have been logged out.", "info")
     return redirect(url_for("home"))
 
@@ -397,99 +643,358 @@ def account_settings():
 
     return render_template("account_settings.html", user=user, form_data=form_data)
 
+@app.route("/admin", methods=["GET", "POST"])
+def admin_portal():
+    allowed, admin_user = require_admin_access()
+    if not allowed:
+        return admin_user
 
+    active_tab = request.args.get("tab") or request.form.get("tab") or "users"
 
-
-@app.route("/orders", methods=["GET", "POST"])
-def orders():
     if request.method == "POST":
-        try:
-            
-            save_info = 'save-info' in request.form
-            
-            
-            user_id = session.get('user_id')
-            
-            
-            if user_id and save_info:
-                
-                first_name = request.form.get('firstName')
-                last_name = request.form.get('lastName')
-                username = request.form.get('username')
-                email = request.form.get('email')
-                address = request.form.get('address')
-                address2 = request.form.get('address2')
-                country = request.form.get('country')
-                state = request.form.get('state')
-                zip_code = request.form.get('zip')
-                payment_method = request.form.get('paymentMethod')
-                card_name = request.form.get('cc-name')
-                card_number = request.form.get('cc-number')
-                card_expiration = request.form.get('cc-expiration')
-                card_number_last4 = card_number[-4:] if card_number else None
-                same_address = 'same-address' in request.form
-                
-                
-                existing_saved_info = SavedPaymentInfo.query.filter_by(user_id=user_id).first()
-                
-                if existing_saved_info:
-                    
-                    existing_saved_info.first_name = first_name
-                    existing_saved_info.last_name = last_name
-                    existing_saved_info.username = username
-                    existing_saved_info.email = email
-                    existing_saved_info.address = address
-                    existing_saved_info.address2 = address2
-                    existing_saved_info.country = country
-                    existing_saved_info.state = state
-                    existing_saved_info.zip_code = zip_code
-                    existing_saved_info.payment_method = payment_method
-                    existing_saved_info.card_name = card_name
-                    existing_saved_info.card_number_last4 = card_number_last4
-                    existing_saved_info.card_expiration = card_expiration
-                    existing_saved_info.same_address = same_address
-                    existing_saved_info.updated_at = datetime.utcnow()
-                    flash("Payment information updated successfully!", "info")
-                else:
-                    
-                    saved_payment_info = SavedPaymentInfo(
-                        user_id=user_id,
-                        first_name=first_name,
-                        last_name=last_name,
-                        username=username,
-                        email=email,
-                        address=address,
-                        address2=address2,
-                        country=country,
-                        state=state,
-                        zip_code=zip_code,
-                        payment_method=payment_method,
-                        card_name=card_name,
-                        card_number_last4=card_number_last4,
-                        card_expiration=card_expiration,
-                        same_address=same_address
-                    )
-                    db.session.add(saved_payment_info)
-                    flash("Payment information saved for next time!", "success")
-                
-                db.session.commit()
-            
-            
-            
-            flash("Order placed successfully!", "success")
-            return redirect(url_for("home"))
+        form_tab = request.form.get("tab", "users")
+        active_tab = form_tab
 
-        except Exception as e:
-            db.session.rollback()
-            flash(f"Error processing order: {str(e)}", "danger")
-            return redirect(url_for("orders"))
-    
-    else:  
-        saved_info = None
-        if 'user_id' in session:
-            saved_info = SavedPaymentInfo.query.filter_by(user_id=session['user_id']).first()
-        
-        return render_template("cart.html", saved_info=saved_info)
+        if form_tab == "users":
+            try:
+                target_user_id = int(request.form.get("user_id"))
+            except (TypeError, ValueError):
+                flash("Invalid user selection.", "danger")
+                return redirect(url_for("admin_portal", tab=form_tab))
+
+            target_user = User.query.get(target_user_id)
+            if not target_user:
+                flash("Selected user not found.", "danger")
+                return redirect(url_for("admin_portal", tab=form_tab))
+
+            new_first_name = (request.form.get("first_name") or "").strip()
+            new_last_name = (request.form.get("last_name") or "").strip()
+            new_email = (request.form.get("email") or "").strip().lower()
+            new_password = (request.form.get("new_password") or "").strip()
+            wants_admin = request.form.get("is_admin") == "on"
+
+            if not new_email:
+                flash("Email address is required.", "warning")
+                return redirect(url_for("admin_portal", tab=form_tab))
+
+            existing_email_user = User.query.filter(User.email == new_email, User.id != target_user.id).first()
+            if existing_email_user:
+                flash("Another account already uses that email address.", "warning")
+                return redirect(url_for("admin_portal", tab=form_tab))
+
+            if target_user.id == admin_user.id and not wants_admin:
+                flash("You cannot remove your own administrator rights while signed in.", "warning")
+                return redirect(url_for("admin_portal", tab=form_tab))
+
+            target_user.first_name = new_first_name or None
+            target_user.last_name = new_last_name or None
+            target_user.email = new_email
+            target_user.is_admin = wants_admin
+
+            new_full_name = f"{new_first_name} {new_last_name}".strip()
+            if new_full_name:
+                target_user.full_name = new_full_name
+            else:
+                target_user.full_name = new_email
+
+            if new_password:
+                target_user.password_hash = generate_password_hash(new_password)
+
+            db.session.commit()
+
+            if target_user.id == admin_user.id:
+                session['user_name'] = target_user.full_name
+                session['is_admin'] = bool(target_user.is_admin)
+
+            flash("User details updated successfully.", "success")
+            return redirect(url_for("admin_portal", tab=form_tab))
+
+        elif form_tab == "market":
+            action = request.form.get("action", "save_override")
+
+            if action == "delete_override":
+                try:
+                    override_id = int(request.form.get("override_id"))
+                except (TypeError, ValueError):
+                    flash("Could not determine which override to delete.", "danger")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+                override = MarketScheduleOverride.query.get(override_id)
+                if not override:
+                    flash("Override not found.", "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+                db.session.delete(override)
+                db.session.commit()
+                flash("Market schedule override removed.", "success")
+                return redirect(url_for("admin_portal", tab=form_tab))
+
+            # Save or update override
+            raw_date = (request.form.get("override_date") or "").strip()
+            if not raw_date:
+                flash("Please provide a date for the market schedule override.", "warning")
+                return redirect(url_for("admin_portal", tab=form_tab))
+
+            try:
+                override_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+            except ValueError:
+                flash("Invalid date format. Please use YYYY-MM-DD.", "danger")
+                return redirect(url_for("admin_portal", tab=form_tab))
+
+            is_closed = request.form.get("is_closed") == "on"
+            open_time_value = None
+            close_time_value = None
+
+            if not is_closed:
+                open_time_str = (request.form.get("open_time") or "").strip()
+                close_time_str = (request.form.get("close_time") or "").strip()
+
+                if not open_time_str or not close_time_str:
+                    flash("Provide both an open and close time or mark the market as closed.", "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+                try:
+                    open_time_value = datetime.strptime(open_time_str, "%H:%M").time()
+                    close_time_value = datetime.strptime(close_time_str, "%H:%M").time()
+                except ValueError:
+                    flash("Invalid time format. Use HH:MM in 24-hour time.", "danger")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+                if close_time_value <= open_time_value:
+                    flash("Close time must be after open time.", "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+            note = (request.form.get("note") or "").strip() or None
+
+            override = MarketScheduleOverride.query.filter_by(date=override_date).first()
+            if override:
+                override.is_closed = is_closed
+                override.open_time = open_time_value
+                override.close_time = close_time_value
+                override.note = note
+            else:
+                override = MarketScheduleOverride(
+                    date=override_date,
+                    is_closed=is_closed,
+                    open_time=open_time_value,
+                    close_time=close_time_value,
+                    note=note,
+                )
+                db.session.add(override)
+
+            db.session.commit()
+
+            flash("Market schedule override saved.", "success")
+            return redirect(url_for("admin_portal", tab=form_tab))
+
+        elif form_tab == "stocks":
+            action = request.form.get("action", "")
+
+            def parse_float(value, field_label, required=False):
+                if value is None:
+                    value = ""
+                value = value.strip()
+                if not value:
+                    if required:
+                        raise ValueError(f"{field_label} is required.")
+                    return None
+                try:
+                    return float(value)
+                except ValueError:
+                    raise ValueError(f"{field_label} must be a valid number.")
+
+            if action == "create_stock":
+                market = (request.form.get("market") or "").strip().upper()
+                symbol = (request.form.get("symbol") or "").strip().upper()
+                name = (request.form.get("name") or "").strip()
+
+                if not market:
+                    flash("Market is required to create a stock.", "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+                if not symbol:
+                    flash("Stock symbol is required.", "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+                if not name:
+                    flash("Company name is required.", "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+                try:
+                    lastsale_value = parse_float(request.form.get("lastsale"), "Last sale price", required=True)
+                    volume_value = parse_float(request.form.get("volume"), "Volume", required=False)
+                    market_cap_value = parse_float(request.form.get("marketCap"), "Market cap", required=False)
+                except ValueError as exc:
+                    flash(str(exc), "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+                existing_stock = (
+                    StockSymbol.query
+                    .filter(func.upper(StockSymbol.symbol) == symbol)
+                    .first()
+                )
+                if existing_stock:
+                    flash("A stock with that symbol already exists in the system.", "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab, stock_symbol=symbol))
+
+                new_stock = StockSymbol(
+                    market=market,
+                    symbol=symbol,
+                    name=name,
+                    lastsale=lastsale_value,
+                    volume=volume_value,
+                    market_cap=market_cap_value,
+                    country=(request.form.get("country") or "").strip() or None,
+                    industry=(request.form.get("industry") or "").strip() or None,
+                    sector=(request.form.get("sector") or "").strip() or None,
+                )
+
+                try:
+                    db.session.add(new_stock)
+                    db.session.commit()
+                    flash(f"Stock {symbol} created successfully.", "success")
+                except Exception as exc:
+                    db.session.rollback()
+                    flash(f"Unable to create stock: {exc}", "danger")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+                return redirect(url_for("admin_portal", tab=form_tab, stock_symbol=symbol))
+
+            elif action == "update_stock":
+                original_symbol = (request.form.get("original_symbol") or "").strip().upper()
+                original_market = (request.form.get("original_market") or "").strip().upper()
+
+                if not original_symbol or not original_market:
+                    flash("Missing original stock identifiers.", "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+                stock = StockSymbol.query.filter_by(market=original_market, symbol=original_symbol).first()
+                if not stock:
+                    flash("Could not find the stock to update.", "danger")
+                    return redirect(url_for("admin_portal", tab=form_tab))
+
+                market = (request.form.get("market") or "").strip().upper()
+                symbol = (request.form.get("symbol") or "").strip().upper()
+                name = (request.form.get("name") or "").strip()
+
+                if not market:
+                    flash("Market is required.", "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab, stock_symbol=original_symbol))
+
+                if not symbol:
+                    flash("Stock symbol is required.", "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab, stock_symbol=original_symbol))
+
+                if not name:
+                    flash("Company name is required.", "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab, stock_symbol=original_symbol))
+
+                try:
+                    lastsale_value = parse_float(request.form.get("lastsale"), "Last sale price", required=True)
+                    volume_value = parse_float(request.form.get("volume"), "Volume", required=False)
+                    market_cap_value = parse_float(request.form.get("marketCap"), "Market cap", required=False)
+                except ValueError as exc:
+                    flash(str(exc), "warning")
+                    return redirect(url_for("admin_portal", tab=form_tab, stock_symbol=original_symbol))
+
+                if (market != original_market) or (symbol != original_symbol):
+                    existing_target = (
+                        StockSymbol.query
+                        .filter(func.upper(StockSymbol.symbol) == symbol)
+                        .first()
+                    )
+                    if existing_target and not (
+                        existing_target.market == original_market
+                        and existing_target.symbol.upper() == original_symbol
+                    ):
+                        flash("Another stock already uses that symbol.", "warning")
+                        return redirect(url_for("admin_portal", tab=form_tab, stock_symbol=original_symbol))
+
+                stock.market = market
+                stock.symbol = symbol
+                stock.name = name
+                stock.lastsale = lastsale_value
+                stock.volume = volume_value
+                stock.market_cap = market_cap_value
+                stock.country = (request.form.get("country") or "").strip() or None
+                stock.industry = (request.form.get("industry") or "").strip() or None
+                stock.sector = (request.form.get("sector") or "").strip() or None
+
+                try:
+                    db.session.commit()
+                    flash(f"Stock {symbol} updated successfully.", "success")
+                except Exception as exc:
+                    db.session.rollback()
+                    flash(f"Unable to update stock: {exc}", "danger")
+                    return redirect(url_for("admin_portal", tab=form_tab, stock_symbol=original_symbol))
+
+                return redirect(url_for("admin_portal", tab=form_tab, stock_symbol=symbol))
+
+            else:
+                flash("Unsupported stock action.", "warning")
+                return redirect(url_for("admin_portal", tab="stocks"))
+
+        else:
+            flash("Unsupported admin action.", "warning")
+            return redirect(url_for("admin_portal", tab="users"))
+
+    users = User.query.order_by(User.full_name.asc()).all()
+    admin_logs = (
+        db.session.query(User.full_name, UserLoginLog.login_at, UserLoginLog.logout_at)
+        .join(User, User.id == UserLoginLog.user_id)
+        .filter(User.is_admin.is_(True))
+        .order_by(UserLoginLog.login_at.desc())
+        .all()
+    )
+
+    market_overrides = (
+        MarketScheduleOverride.query
+        .order_by(MarketScheduleOverride.date.asc())
+        .all()
+    )
+
+    today_status = get_market_status()
+    default_open_label = DEFAULT_MARKET_OPEN_TIME.strftime("%I:%M %p").lstrip("0")
+    default_close_label = DEFAULT_MARKET_CLOSE_TIME.strftime("%I:%M %p").lstrip("0")
+
+    stock_to_edit = None
+    stock_search_symbol = None
+    if active_tab == "stocks":
+        symbol_query = (request.args.get("stock_symbol") or "").strip()
+        if symbol_query:
+            stock_search_symbol = symbol_query.upper()
+            stock_to_edit = (
+                StockSymbol.query
+                .filter(func.upper(StockSymbol.symbol) == stock_search_symbol)
+                .order_by(StockSymbol.market.asc())
+                .first()
+            )
+            if not stock_to_edit:
+                flash(f"No stock found with symbol {stock_search_symbol}.", "info")
+
+    return render_template(
+        "admin.html",
+        users=users,
+        admin_logs=admin_logs,
+        active_tab=active_tab,
+        market_overrides=market_overrides,
+        default_open_time=default_open_label,
+        default_close_time=default_close_label,
+        market_status_summary=today_status,
+        stock_to_edit=stock_to_edit,
+        stock_search_symbol=stock_search_symbol,
+    )
+
+
+@app.route("/admin/customers")
+def admin_customers():
+    allowed, _ = require_admin_access()
+    if not allowed:
+        return _
+
+    activity_rows = build_customer_activity_summary()
+    return render_template("admin_customers.html", customer_activity=activity_rows)
+
 
 # Portfolio management routes - by Kadir Karabulut
 @app.route("/portfolio", methods=["GET", "POST"])
@@ -506,6 +1011,10 @@ def portfolio():
         session.pop('user_name', None)
         flash("User not found. Please sign in again.", "danger")
         return redirect(url_for("login"))
+
+    market_status = get_market_status()
+    market_open = market_status.get("is_open")
+    market_notice = format_market_notice(market_status) if not market_open else None
 
     payment_options = []
 
@@ -526,6 +1035,11 @@ def portfolio():
     payment_option_lookup = {option["value"]: option["label"] for option in payment_options}
 
     if request.method == "POST":
+        market_status = get_market_status()
+        if not market_status.get("is_open"):
+            flash(format_market_notice(market_status), "warning")
+            return redirect(url_for("portfolio"))
+
         action = request.form.get("action", "add")
 
         if action == "delete":
@@ -540,6 +1054,34 @@ def portfolio():
             if not holding:
                 flash("Stock holding not found.", "warning")
                 return redirect(url_for("portfolio"))
+
+            stock_row = (
+                StockSymbol.query
+                .filter(func.upper(StockSymbol.symbol) == holding.symbol.upper())
+                .order_by(StockSymbol.market)
+                .first()
+            )
+
+            price_value = None
+            if stock_row and stock_row.lastsale is not None and stock_row.lastsale > 0:
+                price_value = float(stock_row.lastsale)
+            elif holding.average_price:
+                price_value = float(holding.average_price)
+            else:
+                price_value = 0.0
+
+            total_value = float(holding.shares or 0) * price_value
+
+            trade_entry = Trade(
+                user_id=user_id,
+                symbol=holding.symbol.upper(),
+                shares=holding.shares,
+                price=price_value,
+                total_value=total_value,
+                transaction_type="SELL",
+            )
+
+            db.session.add(trade_entry)
 
             db.session.delete(holding)
             db.session.commit()
@@ -559,17 +1101,31 @@ def portfolio():
 
         symbol = (request.form.get("symbol") or "").upper().strip()
         shares = request.form.get("shares")
-        average_price = request.form.get("average_price")
 
-        if not symbol or not shares or not average_price:
-            flash("All fields are required to add a stock holding.", "danger")
+        if not symbol or not shares:
+            flash("Symbol and shares are required to add a stock holding.", "danger")
         else:
             try:
                 shares_value = float(shares)
-                price_value = float(average_price)
-
-                if shares_value <= 0 or price_value <= 0:
+                if shares_value <= 0:
                     raise ValueError
+
+                stock_row = (
+                    StockSymbol.query
+                    .filter(func.upper(StockSymbol.symbol) == symbol)
+                    .order_by(StockSymbol.market)
+                    .first()
+                )
+
+                if not stock_row or stock_row.lastsale is None:
+                    flash("Unable to find a last sale price for that symbol.", "warning")
+                    return redirect(url_for("portfolio"))
+
+                price_value = float(stock_row.lastsale)
+
+                if price_value <= 0:
+                    flash("Last sale price must be a positive number.", "danger")
+                    return redirect(url_for("portfolio"))
 
                 holding = PortfolioHolding.query.filter_by(user_id=user_id, symbol=symbol).first()
 
@@ -591,10 +1147,20 @@ def portfolio():
                     db.session.add(holding)
                     flash(f"Added {symbol} to your portfolio using {selected_payment_label}.", "success")
 
+                trade_entry = Trade(
+                    user_id=user_id,
+                    symbol=symbol,
+                    shares=shares_value,
+                    price=price_value,
+                    total_value=shares_value * price_value,
+                    transaction_type="BUY",
+                )
+
+                db.session.add(trade_entry)
                 db.session.commit()
             except ValueError:
                 db.session.rollback()
-                flash("Shares and price must be positive numbers.", "danger")
+                flash("Shares must be a positive number.", "danger")
             except Exception as e:
                 db.session.rollback()
                 flash(f"Unable to save stock holding: {str(e)}", "danger")
@@ -628,6 +1194,7 @@ def portfolio():
         stock = stock_lookup.get(holding.symbol.upper())
         current_price = stock.lastsale if stock and stock.lastsale is not None else None
         current_value = holding.shares * current_price if current_price is not None else None
+        cost_value = holding.shares * current_price if current_price is not None else None
         if current_value is not None:
             total_market_value += current_value
             has_market_value = True
@@ -638,6 +1205,7 @@ def portfolio():
                 "stock": stock,
                 "current_price": current_price,
                 "current_value": current_value,
+                "cost_value": cost_value,
                 "pct_change": stock.pctchange if stock else None,
                 "market": stock.market if stock else None,
             }
@@ -657,6 +1225,9 @@ def portfolio():
         total_market_value=total_market_value,
         unrealized_pl=unrealized_pl,
         payment_options=payment_options,
+        market_open=market_open,
+        market_notice=market_notice,
+        market_status=market_status,
     )
 # End of portfolio management routes
 
@@ -692,13 +1263,27 @@ def api_symbols():
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
-        full_name = request.form.get("full_name")
+        full_name = (request.form.get("full_name") or "").strip()
         email = request.form.get("email")
         password = request.form.get("password")
 
         password_hash = generate_password_hash(password)
 
-        new_user = User(full_name=full_name, email=email, password_hash=password_hash)
+        first_name = None
+        last_name = None
+        if full_name:
+            name_parts = full_name.split(None, 1)
+            first_name = name_parts[0]
+            if len(name_parts) > 1:
+                last_name = name_parts[1]
+
+        new_user = User(
+            full_name=full_name or email,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            password_hash=password_hash,
+        )
         db.session.add(new_user)
         db.session.commit()
 
