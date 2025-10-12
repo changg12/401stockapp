@@ -1,5 +1,5 @@
 from flask import Flask, render_template, redirect, url_for, flash, request, jsonify, abort
-from flask_bootstrap5 import Bootstrap
+from flask_bootstrap import Bootstrap
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import session
