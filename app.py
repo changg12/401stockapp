@@ -34,7 +34,7 @@ RANDOM_PRICE_CHECK_INTERVAL = 30  # poll every 30 seconds
 
 _random_price_thread = None
 _random_price_lock = threading.Lock()
-_random_price_last_run_date = None
+#_random_price_last_run_date = None
 
 
 class User(db.Model):
@@ -384,23 +384,21 @@ def _apply_random_price_adjustments():
 
 
 def _random_price_generator_loop():
-    global _random_price_last_run_date
+    
     with app.app_context():
         while True:
-            now = datetime.now(MARKET_TZ)
-            if now.hour == 15 and now.minute == 58:       # time: 15:58 is 3:58 pm
-                if _random_price_last_run_date != now.date():
-                    schedule = get_market_schedule_for_day(now.date())
-                    if not schedule.get("is_closed"):
-                        try:
-                            _apply_random_price_adjustments()
-                            _random_price_last_run_date = now.date()
-                        except Exception:  # pragma: no cover
-                            app.logger.exception("Random stock price generator failed")
-                    else:
-                        _random_price_last_run_date = now.date()
-            time_module.sleep(RANDOM_PRICE_CHECK_INTERVAL)
+            
+            market_status = get_market_status()
+            
+            if market_status.get("is_open"):
+                try:
+                    
+                    _apply_random_price_adjustments()
+                except Exception: 
+                    app.logger.exception("Random stock price generator failed")
 
+            
+            time_module.sleep(RANDOM_PRICE_CHECK_INTERVAL)
 
 def start_random_price_generator():
     global _random_price_thread
