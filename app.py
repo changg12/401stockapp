@@ -6,6 +6,10 @@ from flask import session
 from datetime import datetime, date, time, timedelta
 from math import ceil
 from sqlalchemy import func
+import os
+import random
+import threading
+import time as time_module
 import pytz
 
 app = Flask(__name__)
@@ -22,6 +26,15 @@ db = SQLAlchemy(app)
 MARKET_TZ = pytz.timezone("America/New_York")
 DEFAULT_MARKET_OPEN_TIME = time(9, 30)
 DEFAULT_MARKET_CLOSE_TIME = time(16, 0)
+
+RANDOM_PRICE_MAX_CHANGE = 50.0  # percent bounds for daily move
+RANDOM_PRICE_STDDEV = 10.0  # bell curve spread (standard deviation)
+RANDOM_PRICE_QUANTUM = 0.01  # enforce 0.01% increments
+RANDOM_PRICE_CHECK_INTERVAL = 30  # poll every 30 seconds
+
+_random_price_thread = None
+_random_price_lock = threading.Lock()
+_random_price_last_run_date = None
 
 
 class User(db.Model):
@@ -324,6 +337,83 @@ class StockSymbol(db.Model):
     country = db.Column(db.Text)
     industry = db.Column(db.Text)
     sector = db.Column(db.Text)
+
+# Random Stock Price Generator based on Bell Curve (Gaussian distribution) centered zero (0.0) on the market open days at 3:58pm (15:58).
+def _generate_random_percent_change():
+    change = random.gauss(0.0, RANDOM_PRICE_STDDEV)
+    change = max(min(change, RANDOM_PRICE_MAX_CHANGE), -RANDOM_PRICE_MAX_CHANGE)
+    quantized = round(change / RANDOM_PRICE_QUANTUM) * RANDOM_PRICE_QUANTUM
+    if quantized > RANDOM_PRICE_MAX_CHANGE:
+        return RANDOM_PRICE_MAX_CHANGE
+    if quantized < -RANDOM_PRICE_MAX_CHANGE:
+        return -RANDOM_PRICE_MAX_CHANGE
+    return quantized
+
+
+def _apply_random_price_adjustments():
+    stocks = StockSymbol.query.all()
+    updated = 0
+
+    for stock in stocks:
+        previous_price = stock.lastsale
+        if previous_price is None or previous_price <= 0:
+            stock.netchange = 0.0
+            stock.pctchange = 0.0
+            continue
+
+        percent_change = _generate_random_percent_change()
+        adjustment_factor = 1 + (percent_change / 100.0)  #RANDOM_PRICE_QUANTUM is 0.01 up to 100%
+        new_price = max(previous_price * adjustment_factor, 0.0)
+        new_price = round(new_price, 2) 
+
+        stock.lastsale = new_price
+        stock.netchange = round(new_price - previous_price, 4) #netchange: round to 4 decimal like $11.4539
+        stock.pctchange = round(percent_change, 2) #percent change: round to 2 decimal like 11.35, the increment is 0.01%
+        updated += 1
+
+    if not updated:
+        return
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    app.logger.info("Random stock price generator updated %s symbols", updated)
+
+
+def _random_price_generator_loop():
+    global _random_price_last_run_date
+    with app.app_context():
+        while True:
+            now = datetime.now(MARKET_TZ)
+            if now.hour == 15 and now.minute == 58:       # time: 15:58 is 3:58 pm
+                if _random_price_last_run_date != now.date():
+                    schedule = get_market_schedule_for_day(now.date())
+                    if not schedule.get("is_closed"):
+                        try:
+                            _apply_random_price_adjustments()
+                            _random_price_last_run_date = now.date()
+                        except Exception:  # pragma: no cover
+                            app.logger.exception("Random stock price generator failed")
+                    else:
+                        _random_price_last_run_date = now.date()
+            time_module.sleep(RANDOM_PRICE_CHECK_INTERVAL)
+
+
+def start_random_price_generator():
+    global _random_price_thread
+    with _random_price_lock:
+        if _random_price_thread and _random_price_thread.is_alive():
+            return
+
+        _random_price_thread = threading.Thread(
+            target=_random_price_generator_loop,
+            name="RandomPriceGenerator",
+            daemon=True,
+        )
+        _random_price_thread.start()
 
 
 @app.route("/")
@@ -1218,6 +1308,14 @@ def portfolio():
         else None
     )
 
+    ipo_stocks = (
+        StockSymbol.query
+        .filter(StockSymbol.netchange.is_(None))
+        .order_by(StockSymbol.symbol)
+        .limit(25)
+        .all()
+    )
+
     return render_template(
         "portfolio.html",
         holdings=enriched_holdings,
@@ -1228,6 +1326,7 @@ def portfolio():
         market_open=market_open,
         market_notice=market_notice,
         market_status=market_status,
+        ipo_stocks=ipo_stocks,
     )
 # End of portfolio management routes
 
@@ -1295,6 +1394,8 @@ def signup():
 
 with app.app_context():
     db.create_all()
+    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        start_random_price_generator()
 
 if __name__ == "__main__":
     app.run(debug=True)
