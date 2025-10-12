@@ -33,9 +33,6 @@
           <li class="nav-item">
             <a class="nav-link" href="/">Dashboard</a>
           </li>
-          <li class="nav-item">
-            <a class="nav-link" href="/orders">Orders</a>
-          </li>
           {% if session.get('user_id') %}
           <li class="nav-item active">
             <a class="nav-link" href="/portfolio">Portfolio <span class="sr-only">(current)</span></a>
@@ -63,6 +60,12 @@
         {% endif %}
       {% endwith %}
 
+      {% if market_notice %}
+        <div class="alert alert-warning" role="alert">
+          {{ market_notice }}
+        </div>
+      {% endif %}
+
       <div class="row">
         <div class="col-lg-9">
           <div class="card mb-4">
@@ -84,11 +87,10 @@
                       <th scope="col">Company</th>
                       <th scope="col">Market</th>
                       <th scope="col" class="text-right">Shares</th>
-                      <th scope="col" class="text-right">Average Price</th>
                       <th scope="col" class="text-right">Last Sale</th>
                       <th scope="col" class="text-right">Day %</th>
                       <th scope="col" class="text-right">Cost Value</th>
-                      <th scope="col" class="text-right">Market Value</th>
+                      <!--th scope="col" class="text-right">Market Value</th-->
                       <th scope="col" class="text-right">Actions</th>
                     </tr>
                   </thead>
@@ -102,7 +104,6 @@
                           <td>{{ stock.name if stock else '—' }}</td>
                           <td>{{ item.market or '—' }}</td>
                           <td class="text-right">{{ '%.4f' % holding.shares }}</td>
-                          <td class="text-right">${{ '%.2f' % holding.average_price }}</td>
                           <td class="text-right">
                             {% if item.current_price is not none %}
                               ${{ '%.2f' % item.current_price }}
@@ -117,26 +118,32 @@
                               —
                             {% endif %}
                           </td>
-                          <td class="text-right">${{ '%.2f' % (holding.shares * holding.average_price) }}</td>
                           <td class="text-right">
+                            {% if item.cost_value is not none %}
+                              ${{ '%.2f' % item.cost_value }}
+                            {% else %}
+                              —
+                            {% endif %}
+                          </td>
+                          <!--td class="text-right">
                             {% if item.current_value is not none %}
                               ${{ '%.2f' % item.current_value }}
                             {% else %}
                               —
                             {% endif %}
-                          </td>
+                          </td-->
                           <td class="text-right">
                             <form method="post" class="d-inline">
                               <input type="hidden" name="action" value="delete">
                               <input type="hidden" name="holding_id" value="{{ holding.id }}">
-                              <button type="submit" class="btn btn-outline-danger btn-sm">Sell</button>
+                              <button type="submit" class="btn btn-outline-danger btn-sm" {% if not market_open %}disabled title="Trading is disabled while markets are closed."{% endif %}>Sell</button>
                             </form>
                           </td>
                         </tr>
                       {% endfor %}
                     {% else %}
                       <tr>
-                        <td colspan="10" class="text-center text-muted py-4">No stock holdings yet. Add your first stock below.</td>
+                        <td colspan="9" class="text-center text-muted py-4">No stock holdings yet. Add your first stock below.</td>
                       </tr>
                     {% endif %}
                   </tbody>
@@ -147,6 +154,60 @@
           {% if unrealized_pl is not none %}
           <div class="alert {{ 'alert-success' if unrealized_pl >= 0 else 'alert-danger' }}" role="alert">
             Unrealized Profit or Loss: ${{ '%.2f' % unrealized_pl }}
+          </div>
+          {% endif %}
+          {% if ipo_stocks %}
+          <br>
+          <div class="card mt-3">
+            <div class="card-header">
+              <h5 class="mb-0">New Stocks for IPO (Initial Public Offering)</h5>
+            </div>
+            <div class="card-body p-0">
+              <div class="table-responsive">
+                <table class="table table-sm mb-0 table-striped">
+                  <thead class="thead-light">
+                    <tr>
+                      <th scope="col">Symbol</th>
+                      <th scope="col">Company</th>
+                      <th scope="col" class="text-right">Initial Sale</th>
+                      <th scope="col">Market</th>
+                      <th scope="col" class="text-right">Volume</th>
+                      <th scope="col" class="text-right">Market Cap</th>
+                      <th scope="col">Country</th>
+                      <th scope="col">Industry</th>
+                      <th scope="col">Sector</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for ipo in ipo_stocks %}
+                    <tr>
+                      <td class="font-weight-bold">{{ ipo.symbol }}</td>
+                      <td>{{ ipo.name or '—' }}</td>
+                      <td class="text-right">
+                        {% if ipo.lastsale is not none %}
+                          ${{ '%.2f' % ipo.lastsale }}
+                        {% else %}
+                          —
+                        {% endif %}
+                      </td>
+                      <td>{{ ipo.market or '—' }}</td>
+                      <td class="text-right">{{ '{:,.0f}'.format(ipo.volume) if ipo.volume is not none else '—' }}</td>
+                      <td class="text-right">
+                        {% if ipo.market_cap is not none %}
+                          ${{ '{:,.2f}'.format(ipo.market_cap) }}
+                        {% else %}
+                          —
+                        {% endif %}
+                      </td>
+                      <td>{{ ipo.country or '—' }}</td>
+                      <td>{{ ipo.industry or '—' }}</td>
+                      <td>{{ ipo.sector or '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
           {% endif %}
         </div>
@@ -162,16 +223,12 @@
                   <input type="text" class="form-control" id="symbol" name="symbol" placeholder="e.g. AAPL" autocomplete="off" required>
                 </div>
                 <div class="form-group">
-                  <label for="last-sale-value">Last Sale (reference)</label>
+                  <label for="last-sale-value">Last Sale</label>
                   <p id="last-sale-value" class="form-control-plaintext px-3 py-2 bg-light border rounded">—</p>
                 </div>
                 <div class="form-group">
                   <label for="shares">Shares</label>
-                  <input type="number" step="0.0001" min="0.0001" class="form-control" id="shares" name="shares" required>
-                </div>
-                <div class="form-group">
-                  <label for="average_price">Average Price ($)</label>
-                  <input type="number" step="0.01" min="0.01" class="form-control" id="average_price" name="average_price" required>
+                  <input type="number" step="0.01" min="0.01" class="form-control" id="shares" name="shares" required>
                 </div>
                 <div class="form-group">
                   <label for="payment_method">Payment Method</label>
@@ -187,7 +244,7 @@
                   Add a payment method in <a href="{{ url_for('account_settings') }}" class="alert-link">Account Settings</a> before buying.
                 </div>
                 {% endif %}
-                <button type="submit" class="btn btn-primary btn-block">Buy Stock</button>
+                <button type="submit" class="btn btn-primary btn-block" {% if not market_open %}disabled title="Trading is disabled while markets are closed."{% endif %}>Buy Stock</button>
               </form>
             </div>
           </div>
