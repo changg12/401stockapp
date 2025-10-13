@@ -338,7 +338,7 @@ class StockSymbol(db.Model):
     industry = db.Column(db.Text)
     sector = db.Column(db.Text)
 
-# Random Stock Price Generator based on Bell Curve (Gaussian distribution) centered zero (0.0) on the market open days at 3:58pm (15:58).
+#Random Stock Price Generator based on Bell Curve (Gaussian distribution) centered zero (0.0) on the market open days at 3:58pm (15:58).
 def _generate_random_percent_change():
     change = random.gauss(0.0, RANDOM_PRICE_STDDEV)
     change = max(min(change, RANDOM_PRICE_MAX_CHANGE), -RANDOM_PRICE_MAX_CHANGE)
