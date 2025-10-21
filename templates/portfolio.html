@@ -9,47 +9,111 @@
       body {
         font-size: .875rem;
       }
-      .container {
-      width: 100%;
-      padding-right: 15px;
-      padding-left: 15px;
-      margin-right: auto;
-      margin-left: auto
+
+      .sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 100;
+        padding: 0;
+        box-shadow: inset -1px 0 0 rgba(0, 0, 0, .1);
       }
-      @media (min-width:1250px) {.container {
-      max-width: 1240px;
+
+      .sidebar-sticky {
+        position: -webkit-sticky;
+        position: sticky;
+        top: 48px;
+        height: calc(100vh - 48px);
+        padding-top: .5rem;
+        overflow-x: hidden;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
       }
+
+      .sidebar .nav-link {
+        font-weight: 500;
+        color: #333;
       }
-    </style>  
+
+      .sidebar .nav-link.active {
+        color: #007bff;
+      }
+
+      .sidebar-heading {
+        font-size: .75rem;
+        text-transform: uppercase;
+      }
+    </style>
   </head>
   <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-      <a class="navbar-brand" href="/">401 Stock App</a>
-      <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav ml-auto">
-          <li class="nav-item">
-            <a class="nav-link" href="/">Dashboard</a>
-          </li>
+    <nav class="navbar navbar-dark sticky-top bg-dark flex-md-nowrap p-0">
+      <a class="navbar-brand col-sm-3 col-md-2 mr-0" href="/">401 Stock App</a>
+      <span class="form-control form-control-dark w-100 bg-dark border-0 text-right text-white pr-4">Portfolio</span>
+      <ul class="navbar-nav px-3">
+        <li class="nav-item text-nowrap">
           {% if session.get('user_id') %}
-          <li class="nav-item active">
-            <a class="nav-link" href="/portfolio">Portfolio <span class="sr-only">(current)</span></a>
-          </li>
-          <li class="nav-item">
             <a class="nav-link" href="/logout">Logout</a>
-          </li>
           {% else %}
-          <li class="nav-item">
             <a class="nav-link" href="/login">Login</a>
-          </li>
           {% endif %}
-        </ul>
-      </div>
+        </li>
+      </ul>
     </nav>
 
-    <div class="container">
+    <div class="container-fluid">
+      <div class="row">
+        <nav class="col-md-2 d-none d-md-block bg-light sidebar">
+          <div class="sidebar-sticky">
+            <ul class="nav flex-column">
+              <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('home') }}">
+                  <span data-feather="home"></span>
+                  Dashboard
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link active" href="{{ url_for('portfolio') }}">
+                  <span data-feather="briefcase"></span>
+                  Portfolio
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('reports') }}">
+                  <span data-feather="bar-chart-2"></span>
+                  Reports
+                </a>
+              </li>
+              {% if session.get('is_admin') %}
+              <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+                <span>ADMIN</span>
+              </h6>
+              <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('admin_portal') }}">
+                  <span data-feather="shield"></span>
+                  Admin Portal
+                </a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('admin_customers') }}">
+                  <span data-feather="user-check"></span>
+                  Customers
+                </a>
+              </li>
+              {% endif %}
+            </ul>
+            {% if session.get('user_id') %}
+            <div class="mt-auto px-3 pb-3">
+              <a class="btn btn-outline-secondary btn-sm btn-block text-left" href="{{ url_for('account_settings') }}">
+                Account Settings
+              </a>
+            </div>
+            {% endif %}
+          </div>
+        </nav>
+
+        <main role="main" class="col-md-9 ml-sm-auto col-lg-10 pt-3 px-4">
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           {% for category, message in messages %}
@@ -89,8 +153,8 @@
                       <th scope="col" class="text-right">Shares</th>
                       <th scope="col" class="text-right">Last Sale</th>
                       <th scope="col" class="text-right">Day %</th>
-                      <th scope="col" class="text-right">Cost Value</th>
-                      <!--th scope="col" class="text-right">Market Value</th-->
+                      <th scope="col" class="text-right">Purchased Value</th>
+                      <th scope="col" class="text-right">Market Value</th>
                       <th scope="col" class="text-right">Actions</th>
                     </tr>
                   </thead>
@@ -125,13 +189,13 @@
                               —
                             {% endif %}
                           </td>
-                          <!--td class="text-right">
+                          <td class="text-right">
                             {% if item.current_value is not none %}
                               ${{ '%.2f' % item.current_value }}
                             {% else %}
                               —
                             {% endif %}
-                          </td-->
+                          </td>
                           <td class="text-right">
                             <form method="post" class="d-inline">
                               <input type="hidden" name="action" value="delete">
@@ -250,7 +314,9 @@
           </div>
         </div>
       </div>
-    </div>
+    </main>
+  </div>
+</div>
 
     <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.12.9/dist/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
