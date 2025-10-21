@@ -16,7 +16,7 @@ app = Flask(__name__)
 bootstrap = Bootstrap(app)
 
 # Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:Password@localhost/flask_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:12345678@localhost/flask_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'awdasdawdasdawdasdawdasd'
 
@@ -30,11 +30,19 @@ DEFAULT_MARKET_CLOSE_TIME = time(16, 0)
 RANDOM_PRICE_MAX_CHANGE = 50.0  # percent bounds for daily move
 RANDOM_PRICE_STDDEV = 10.0  # bell curve spread (standard deviation)
 RANDOM_PRICE_QUANTUM = 0.01  # enforce 0.01% increments
-RANDOM_PRICE_CHECK_INTERVAL = 30  # poll every 30 seconds
+RANDOM_PRICE_CHECK_INTERVAL = 120  # poll every 120 seconds
 
 _random_price_thread = None
 _random_price_lock = threading.Lock()
-_random_price_last_run_date = None
+#_random_price_last_run_date = None
+
+
+def shift_month_start(reference: datetime, months: int) -> datetime:
+    """Return the first day of the month offset by `months` from `reference`."""
+    month_index = (reference.month - 1) + months
+    year = reference.year + month_index // 12
+    month = (month_index % 12) + 1
+    return datetime(year, month, 1)
 
 
 class User(db.Model):
@@ -337,8 +345,9 @@ class StockSymbol(db.Model):
     country = db.Column(db.Text)
     industry = db.Column(db.Text)
     sector = db.Column(db.Text)
+    createdate = db.Column('createdate', db.DateTime, nullable=True, default=datetime.utcnow)
 
-# Random Stock Price Generator based on Bell Curve (Gaussian distribution) centered zero (0.0) on the market open days at 3:58pm (15:58).
+# Random Stock Price Generator based on Bell Curve (Gaussian distribution) centered zero (0.0) on the market open days.
 def _generate_random_percent_change():
     change = random.gauss(0.0, RANDOM_PRICE_STDDEV)
     change = max(min(change, RANDOM_PRICE_MAX_CHANGE), -RANDOM_PRICE_MAX_CHANGE)
@@ -362,7 +371,7 @@ def _apply_random_price_adjustments():
             continue
 
         percent_change = _generate_random_percent_change()
-        adjustment_factor = 1 + (percent_change / 100.0)  #RANDOM_PRICE_QUANTUM is 0.01 up to 100%
+        adjustment_factor = 1 + (percent_change / 100.0) 
         new_price = max(previous_price * adjustment_factor, 0.0)
         new_price = round(new_price, 2) 
 
@@ -384,23 +393,15 @@ def _apply_random_price_adjustments():
 
 
 def _random_price_generator_loop():
-    global _random_price_last_run_date
     with app.app_context():
         while True:
-            now = datetime.now(MARKET_TZ)
-            if now.hour == 15 and now.minute == 58:       # time: 15:58 is 3:58 pm
-                if _random_price_last_run_date != now.date():
-                    schedule = get_market_schedule_for_day(now.date())
-                    if not schedule.get("is_closed"):
-                        try:
-                            _apply_random_price_adjustments()
-                            _random_price_last_run_date = now.date()
-                        except Exception:  # pragma: no cover
-                            app.logger.exception("Random stock price generator failed")
-                    else:
-                        _random_price_last_run_date = now.date()
+            market_status = get_market_status()
+            if market_status.get("is_open"):
+                try:
+                    _apply_random_price_adjustments()
+                except Exception: 
+                    app.logger.exception("Random stock price generator failed")            
             time_module.sleep(RANDOM_PRICE_CHECK_INTERVAL)
-
 
 def start_random_price_generator():
     global _random_price_thread
@@ -414,7 +415,6 @@ def start_random_price_generator():
             daemon=True,
         )
         _random_price_thread.start()
-
 
 @app.route("/")
 def home():
@@ -532,6 +532,227 @@ def home():
         avg_pct_change=avg_pct_change,
         stocks_by_market=stocks_by_market,
         market_pagination=market_pagination,
+    )
+
+
+
+@app.route("/reports")
+def reports():
+    if 'user_id' not in session:
+        flash("Please log in to view reports.", "warning")
+        return redirect(url_for("login"))
+
+    user_id = session['user_id']
+
+    holdings = (
+        PortfolioHolding.query
+        .filter_by(user_id=user_id)
+        .order_by(PortfolioHolding.symbol)
+        .all()
+    )
+
+    total_cost_basis = sum((holding.shares or 0) * (holding.average_price or 0) for holding in holdings)
+
+    symbol_set = {holding.symbol.upper() for holding in holdings}
+
+    trades = (
+        Trade.query
+        .filter_by(user_id=user_id)
+        .order_by(Trade.created_at.asc())
+        .all()
+    )
+
+    symbol_set.update(trade.symbol.upper() for trade in trades)
+
+    stock_rows = []
+    if symbol_set:
+        stock_rows = (
+            StockSymbol.query
+            .filter(StockSymbol.symbol.in_(symbol_set))
+            .all()
+        )
+
+    stock_lookup = {row.symbol.upper(): row for row in stock_rows}
+    price_lookup = {symbol: (row.lastsale or 0.0) for symbol, row in stock_lookup.items()}
+
+    total_market_value = 0.0
+    for holding in holdings:
+        price = price_lookup.get(holding.symbol.upper())
+        if price is None:
+            continue
+        total_market_value += (holding.shares or 0) * price
+
+    enriched_holdings = []
+    for holding in holdings:
+        symbol_key = holding.symbol.upper()
+        stock = stock_lookup.get(symbol_key)
+        current_price = stock.lastsale if stock and stock.lastsale is not None else None
+        shares_value = float(holding.shares or 0)
+        current_value = shares_value * current_price if current_price is not None else None
+        average_price = holding.average_price if holding.average_price is not None else None
+        cost_value = shares_value * average_price if average_price is not None else None
+
+        enriched_holdings.append(
+            {
+                "holding": holding,
+                "stock": stock,
+                "current_price": current_price,
+                "current_value": current_value,
+                "cost_value": cost_value,
+                "average_price": average_price,
+                "pct_change": stock.pctchange if stock else None,
+                "market": stock.market if stock else None,
+            }
+        )
+
+    timeline = []
+
+    def snapshot(timestamp: datetime, state: dict):
+        total_cost = sum(item["cost"] for item in state.values())
+        total_value = 0.0
+        for symbol_key, data in state.items():
+            price = price_lookup.get(symbol_key, 0.0)
+            total_value += price * data["shares"]
+        timeline.append({
+            "timestamp": timestamp,
+            "cost": total_cost,
+            "value": total_value,
+        })
+
+    holdings_state = {}
+
+    if trades:
+        first_trade_time = trades[0].created_at - timedelta(seconds=1)
+        snapshot(first_trade_time, holdings_state)
+
+    for trade in trades:
+        symbol_key = trade.symbol.upper()
+        state = holdings_state.setdefault(symbol_key, {"shares": 0.0, "cost": 0.0})
+        shares = float(trade.shares or 0)
+        total_value = float(trade.total_value or 0)
+
+        if trade.transaction_type.upper() == "BUY":
+            state["shares"] += shares
+            state["cost"] += total_value
+        else:
+            shares_to_sell = min(state["shares"], shares)
+            if shares_to_sell > 0:
+                avg_cost = state["cost"] / state["shares"] if state["shares"] else 0.0
+                state["shares"] -= shares_to_sell
+                state["cost"] -= avg_cost * shares_to_sell
+
+        snapshot(trade.created_at, holdings_state)
+
+    current_snapshot_time = datetime.utcnow()
+    current_snapshot_state = {}
+    for holding in holdings:
+        current_snapshot_state[holding.symbol.upper()] = {
+            "shares": float(holding.shares or 0),
+            "cost": float((holding.shares or 0) * (holding.average_price or 0)),
+        }
+
+    snapshot(current_snapshot_time, current_snapshot_state)
+
+    timeline.sort(key=lambda entry: entry["timestamp"])
+
+    if not timeline:
+        timeline.append({
+            "timestamp": current_snapshot_time,
+            "cost": total_cost_basis,
+            "value": total_market_value,
+        })
+
+    chart_labels = [entry["timestamp"].strftime("%Y-%m-%d %H:%M") for entry in timeline]
+    chart_cost_values = [round(entry["cost"], 2) for entry in timeline]
+    chart_market_values = [round(entry["value"], 2) for entry in timeline]
+
+    def latest_snapshot_before(target: datetime):
+        selected = None
+        for entry in timeline:
+            if entry["timestamp"] <= target:
+                selected = entry
+            else:
+                break
+        return selected
+
+    current_snapshot = timeline[-1]
+
+    now = datetime.utcnow()
+    month_start = datetime(now.year, now.month, 1)
+    six_month_start = shift_month_start(month_start, -5)
+    year_start = datetime(now.year, 1, 1)
+
+    period_definitions = [
+        ("month", "Calendar Month", month_start, 21),
+        ("six_month", "Last 6 Months", six_month_start, 126),
+        ("year", "Year to Date", year_start, 252),
+    ]
+
+    def compute_portfolio_growth(start_dt: datetime):
+        baseline = latest_snapshot_before(start_dt)
+        base_value = baseline["value"] if baseline else 0.0
+        current_value = current_snapshot["value"]
+        abs_change = current_value - base_value
+        if base_value:
+            pct_change = (abs_change / base_value) * 100.0
+        else:
+            pct_change = 0.0 if current_value == 0 else None
+        return {
+            "abs_change": abs_change,
+            "pct_change": pct_change,
+        }
+
+    portfolio_performance = {
+        key: compute_portfolio_growth(start_dt)
+        for key, _, start_dt, _ in period_definitions
+    }
+
+    markets = ["NASDAQ", "NYSE", "AMEX"]
+    market_rows = []
+    for market in markets:
+        sum_value, count_value = (
+            db.session.query(
+                func.coalesce(func.sum(StockSymbol.pctchange), 0),
+                func.count(StockSymbol.symbol),
+            )
+            .filter(StockSymbol.market == market)
+            .one()
+        )
+
+        avg_daily_change = (sum_value / count_value) if count_value else 0.0
+
+        values = {}
+        for key, _, _, trading_days in period_definitions:
+            if avg_daily_change:
+                compounded = (pow(1 + (avg_daily_change / 100.0), trading_days) - 1) * 100.0
+            else:
+                compounded = 0.0
+            values[key] = compounded
+
+        display_name = "APEX" if market == "AMEX" else market
+        market_rows.append({
+            "label": display_name,
+            "values": values,
+        })
+
+    performance_rows = [
+        {
+            "label": "Portfolio",
+            "values": {key: portfolio_performance[key]["pct_change"] for key, _, _, _ in period_definitions},
+        }
+    ] + market_rows
+
+    return render_template(
+        "reports.html",
+        chart_labels=chart_labels,
+        chart_cost_values=chart_cost_values,
+        chart_market_values=chart_market_values,
+        total_cost_basis=total_cost_basis,
+        total_market_value=total_market_value,
+        period_definitions=period_definitions,
+        performance_rows=performance_rows,
+        portfolio_performance=portfolio_performance,
+        holding_rows=enriched_holdings,
     )
 
 
@@ -937,6 +1158,7 @@ def admin_portal():
                     country=(request.form.get("country") or "").strip() or None,
                     industry=(request.form.get("industry") or "").strip() or None,
                     sector=(request.form.get("sector") or "").strip() or None,
+                    createdate=datetime.utcnow(),
                 )
 
                 try:
@@ -1284,7 +1506,8 @@ def portfolio():
         stock = stock_lookup.get(holding.symbol.upper())
         current_price = stock.lastsale if stock and stock.lastsale is not None else None
         current_value = holding.shares * current_price if current_price is not None else None
-        cost_value = holding.shares * current_price if current_price is not None else None
+        average_price = holding.average_price if holding.average_price is not None else None
+        cost_value = holding.shares * average_price if average_price is not None else None
         if current_value is not None:
             total_market_value += current_value
             has_market_value = True
@@ -1296,6 +1519,7 @@ def portfolio():
                 "current_price": current_price,
                 "current_value": current_value,
                 "cost_value": cost_value,
+                "average_price": average_price,
                 "pct_change": stock.pctchange if stock else None,
                 "market": stock.market if stock else None,
             }
@@ -1310,8 +1534,8 @@ def portfolio():
 
     ipo_stocks = (
         StockSymbol.query
-        .filter(StockSymbol.netchange.is_(None))
-        .order_by(StockSymbol.symbol)
+        .filter(StockSymbol.createdate.isnot(None))
+        .order_by(StockSymbol.createdate.desc(), StockSymbol.symbol)
         .limit(25)
         .all()
     )
