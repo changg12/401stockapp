@@ -158,8 +158,14 @@
             <h1 class="h2">Performance Reports</h1>
           </div>
 
-          {% set total_performance_value = total_performance or 0 %}
-          {% set total_performance_pct_value = total_performance_pct %}
+          {% set total_cost = total_cost_basis or 0 %}
+          {% set total_market = total_market_value or 0 %}
+          {% set unrealized = total_market - total_cost %}
+          {% if total_cost %}
+            {% set unrealized_pct = (unrealized / total_cost) * 100 %}
+          {% else %}
+            {% set unrealized_pct = None %}
+          {% endif %}
           <div class="row mb-4">
             <div class="col-md-4 mb-3">
               <div class="card card-metric h-100">
@@ -178,16 +184,15 @@
               </div>
             </div>
             <div class="col-md-4 mb-3">
-              <div class="card card-metric h-100 {{ 'negative' if total_performance_value < 0 else '' }}">
+              <div class="card card-metric h-100 {{ 'negative' if unrealized < 0 else '' }}">
                 <div class="card-body">
-                  <div class="metric-subtitle">Total Performance</div>
-                  <div class="metric-value {{ 'growth-negative' if total_performance_value < 0 else 'growth-positive' if total_performance_value > 0 else '' }}">
-                    {% if total_performance_value >= 0 %}+{% endif %}${{ '%.2f' % total_performance_value }}
-                    {% if total_performance_pct_value is not none %}
-                      <span class="h6 ml-2 {{ 'growth-negative' if total_performance_pct_value < 0 else 'growth-positive' if total_performance_pct_value > 0 else '' }}">({{ '%.2f%%' % total_performance_pct_value }})</span>
+                  <div class="metric-subtitle">Unrealized Gain/Loss</div>
+                  <div class="metric-value {{ 'growth-negative' if unrealized < 0 else 'growth-positive' if unrealized > 0 else '' }}">
+                    {% if unrealized >= 0 %}+{% endif %}${{ '%.2f' % unrealized }}
+                    {% if unrealized_pct is not none %}
+                      <span class="h6 ml-2 {{ 'growth-negative' if unrealized_pct < 0 else 'growth-positive' if unrealized_pct > 0 else '' }}">({{ '%.2f%%' % unrealized_pct }})</span>
                     {% endif %}
                   </div>
-                  <div class="text-muted small">Sales: ${{ '%.2f' % (total_sell_value or 0) }} &middot; Realized Cost: ${{ '%.2f' % (realized_cost or 0) }}</div>
                 </div>
               </div>
             </div>
