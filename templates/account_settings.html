@@ -38,7 +38,19 @@
           {% endif %}
         {% endwith %}
 
+        <ul class="nav nav-tabs mb-4">
+          <li class="nav-item">
+            <a class="nav-link {% if active_tab == 'profile' %}active{% endif %}" href="{{ url_for('account_settings', tab='profile') }}">Profile &amp; Billing</a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link {% if active_tab == 'wallet' %}active{% endif %}" href="{{ url_for('account_settings', tab='wallet') }}">Wallet</a>
+          </li>
+        </ul>
+
+        {% if active_tab == 'profile' %}
         <form method="post" novalidate>
+          <input type="hidden" name="tab" value="profile">
+          <input type="hidden" name="form_type" value="profile">
           <div class="card mb-4">
             <div class="card-header font-weight-bold">Profile</div>
             <div class="card-body">
@@ -57,7 +69,7 @@
               </div>
               <div class="form-group">
                 <label for="phone_number">Phone Number</label>
-                <input type="tel" class="form-control" id="phone_number" name="phone_number" value="{{ form_data.get('phone_number', '') }}" pattern="[0-9]{10}" title="Please enter a valid 10-digit phone number" minlength="10" maxlength="10" inputmode="numeric" oninput="this.value = this.value.replace(/\D/g, '')" required>
+                <input type="tel" class="form-control" id="phone_number" name="phone_number" value="{{ form_data.get('phone_number', '') }}" required>
               </div>
             </div>
           </div>
@@ -71,7 +83,7 @@
               <div class="form-row">
                 <div class="form-group col-md-4">
                   <label for="credit_card_number">Card Number</label>
-                  <input type="text" class="form-control" id="credit_card_number" name="credit_card_number" placeholder="Enter new card number" pattern="[0-9]{13,19}" maxlength="19" inputmode="numeric" title="Please enter a valid card number (13-19 digits)" oninput="this.value = this.value.replace(/\D/g, '')">
+                  <input type="text" class="form-control" id="credit_card_number" name="credit_card_number" placeholder="Enter new card number">
                   {% if user.credit_card_last4 %}
                     <small class="form-text text-muted">Current card ending in {{ user.credit_card_last4 }}.</small>
                   {% endif %}
@@ -82,7 +94,7 @@
                 </div>
                 <div class="form-group col-md-4">
                   <label for="credit_card_expiration">Expiration (MM/YY)</label>
-                  <input type="text" class="form-control" id="credit_card_expiration" name="credit_card_expiration" value="{{ form_data.get('credit_card_expiration', '') }}" pattern="(0[1-9]|1[0-2])\/([0-9]{2})" maxlength="5" placeholder="MM/YY" title="Enter expiration date in MM/YY format">
+                  <input type="text" class="form-control" id="credit_card_expiration" name="credit_card_expiration" value="{{ form_data.get('credit_card_expiration', '') }}">
                 </div>
               </div>
               <div class="form-group form-check">
@@ -96,7 +108,7 @@
               <div class="form-row">
                 <div class="form-group col-md-4">
                   <label for="checking_account_number">Account Number</label>
-                  <input type="text" class="form-control" id="checking_account_number" name="checking_account_number" placeholder="Enter new account number" pattern="[0-9]{8,12}" title="Please enter a valid account number (8-12 digits)" maxlength="12" inputmode="numeric" oninput="this.value = this.value.replace(/\D/g, '')">
+                  <input type="text" class="form-control" id="checking_account_number" name="checking_account_number" placeholder="Enter new account number">
                   {% if user.checking_account_last4 %}
                     <small class="form-text text-muted">Current account ending in {{ user.checking_account_last4 }}.</small>
                   {% endif %}
@@ -107,7 +119,7 @@
                 </div>
                 <div class="form-group col-md-4">
                   <label for="checking_routing_number">Routing Number</label>
-                  <input type="text" class="form-control" id="checking_routing_number" name="checking_routing_number" value="{{ form_data.get('checking_routing_number', '') }}" pattern="[0-9]{9}" maxlength="9" inputmode="numeric" title="Please enter a valid 9-digit routing number" oninput="this.value = this.value.replace(/\D/g, '')">
+                  <input type="text" class="form-control" id="checking_routing_number" name="checking_routing_number" value="{{ form_data.get('checking_routing_number', '') }}">
                 </div>
               </div>
               <div class="form-group form-check">
@@ -142,152 +154,60 @@
             <button type="submit" class="btn btn-primary">Save Changes</button>
           </div>
         </form>
+        {% else %}
+        <div class="card mb-4">
+          <div class="card-header font-weight-bold d-flex justify-content-between align-items-center">
+            <span>Wallet</span>
+            <span class="badge badge-pill badge-info">Balance: ${{ '%.2f' % wallet_balance }}</span>
+          </div>
+          <div class="card-body">
+            <p class="text-muted">Move funds between your saved payment methods and trading wallet. Wallet funds are required to buy stocks and receive sale proceeds.</p>
+            <form method="post" class="mt-3">
+              <input type="hidden" name="tab" value="wallet">
+              <input type="hidden" name="form_type" value="wallet">
+              <div class="form-row">
+                <div class="form-group col-md-4">
+                  <label for="wallet_amount">Amount</label>
+                  <input type="number" step="0.01" min="0.01" class="form-control" id="wallet_amount" name="wallet_amount" placeholder="0.00" required>
+                </div>
+                <div class="form-group col-md-4">
+                  <label>Action</label>
+                  <div class="d-flex flex-column">
+                    <div class="form-check form-check-inline">
+                      <input class="form-check-input" type="radio" name="wallet_action" id="wallet_action_deposit" value="deposit" required>
+                      <label class="form-check-label" for="wallet_action_deposit">Deposit</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                      <input class="form-check-input" type="radio" name="wallet_action" id="wallet_action_withdraw" value="withdraw" required>
+                      <label class="form-check-label" for="wallet_action_withdraw">Withdraw</label>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-group col-md-4">
+                  <label for="wallet_payment_source">Funding Source</label>
+                  <select class="form-control" id="wallet_payment_source" name="wallet_payment_source" required {% if not payment_methods %}disabled{% endif %}>
+                    <option value="" selected disabled>Select source</option>
+                    {% for method in payment_methods %}
+                      <option value="{{ method.value }}">{{ method.label }}</option>
+                    {% endfor %}
+                  </select>
+                  {% if not payment_methods %}
+                    <small class="form-text text-muted">Add a payment method in the Profile tab before transferring funds.</small>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="text-right">
+                <button type="submit" class="btn btn-primary" {% if not payment_methods %}disabled{% endif %}>Submit</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        {% endif %}
       </div>
     </main>
 
     <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/popper.js@1.12.9/dist/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.0.0/dist/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
-    <script>
-      //Credit card number validation
-      document.getElementById('credit_card_number').addEventListener('input', function(e) {
-        this.value = this.value.replace(/\D/g, ''); //numbers only
-        if (this.value.length > 19) {
-          this.value = this.value.slice(0, 19); //limit to 19
-        }
-      });
-
-      document.getElementById('credit_card_number').addEventListener('keypress', function(e) {
-        if (e.key < '0' || e.key > '9') {
-          e.preventDefault(); //numbers only
-        }
-        if (this.value.length >= 19) {
-          e.preventDefault(); //limit to 19
-        }
-      });
-
-      document.getElementById('credit_card_number').addEventListener('paste', function(e) {
-        e.preventDefault();
-        let pastedText = (e.clipboardData || window.clipboardData).getData('text');
-        this.value = pastedText.replace(/\D/g, '').slice(0, 19);
-      });
-
-      // Credit card expiration validation
-      document.getElementById('credit_card_expiration').addEventListener('input', function(e) {
-        let value = this.value.replace(/\D/g, ''); //numbers only
-        if (value.length >= 2) {
-          let month = value.slice(0, 2);
-          if (parseInt(month) > 12) { month = '12'; } //litmit month to 12
-          if (value.length > 2) {
-            let year = value.slice(2, 4);
-            value = month + '/' + year;
-          } else {
-            value = month;
-          }
-        }
-        this.value = value;
-      });
-
-      document.getElementById('credit_card_expiration').addEventListener('keypress', function(e) {
-        if (e.key < '0' || e.key > '9') {
-          e.preventDefault(); //numbers only
-        }
-        if (this.value.replace(/\D/g, '').length >= 4) {
-          e.preventDefault(); //MM/YY format
-        }
-      });
-
-      document.getElementById('credit_card_expiration').addEventListener('paste', function(e) {
-        e.preventDefault();
-        let pastedText = (e.clipboardData || window.clipboardData).getData('text');
-        let cleaned = pastedText.replace(/\D/g, '').slice(0, 4);
-        if (cleaned.length >= 2) {
-          let month = cleaned.slice(0, 2);
-          if (parseInt(month) > 12) { month = '12'; }
-          if (cleaned.length > 2) {
-            let year = cleaned.slice(2, 4);
-            cleaned = month + '/' + year;
-          } else {
-            cleaned = month;
-          }
-        }
-        this.value = cleaned;
-      });
-      document.getElementById('phone_number').addEventListener('input', function(e) {
-        //numbers only
-        this.value = this.value.replace(/\D/g, '');
-        
-        //maximum length
-        if (this.value.length > 10) {
-          this.value = this.value.slice(0, 10);
-        }
-      });
-
-      document.getElementById('phone_number').addEventListener('paste', function(e) {
-        
-        e.preventDefault();
-        
-        
-        let pastedText = (e.clipboardData || window.clipboardData).getData('text');
-        let cleanedText = pastedText.replace(/\D/g, '').slice(0, 10);
-        
-      
-        this.value = cleanedText;
-      });
-
-      document.getElementById('phone_number').addEventListener('keypress', function(e) {
-        //only numbers
-        if (e.key < '0' || e.key > '9') {
-          e.preventDefault();
-        }
-        //maximum length
-        if (this.value.length >= 10) {
-          e.preventDefault();
-        }
-      });
-
-      //Checking account number validation
-      document.getElementById('checking_account_number').addEventListener('input', function(e) {
-        this.value = this.value.replace(/\D/g, ''); //numbers only
-        if (this.value.length > 12) {
-          this.value = this.value.slice(0, 12); //limit to 12
-        }
-      });
-
-      document.getElementById('checking_account_number').addEventListener('keypress', function(e) {
-        if (e.key < '0' || e.key > '9') {
-          e.preventDefault(); //numbers only
-        }
-      });
-
-      document.getElementById('checking_account_number').addEventListener('paste', function(e) {
-        e.preventDefault();
-        let pastedText = (e.clipboardData || window.clipboardData).getData('text');
-        this.value = pastedText.replace(/\D/g, '');
-      });
-
-      //Routing number validation
-      document.getElementById('checking_routing_number').addEventListener('input', function(e) {
-        this.value = this.value.replace(/\D/g, ''); //numbers only
-        if (this.value.length > 9) {
-          this.value = this.value.slice(0, 9); //only 9
-        }
-      });
-
-      document.getElementById('checking_routing_number').addEventListener('keypress', function(e) {
-        if (e.key < '0' || e.key > '9') {
-          e.preventDefault(); //numbers only
-        }
-        if (this.value.length >= 9) {
-          e.preventDefault(); //limit to 9
-        }
-      });
-
-      document.getElementById('checking_routing_number').addEventListener('paste', function(e) {
-        e.preventDefault();
-        let pastedText = (e.clipboardData || window.clipboardData).getData('text');
-        this.value = pastedText.replace(/\D/g, '').slice(0, 9);
-      });
-    </script>
   </body>
 </html>

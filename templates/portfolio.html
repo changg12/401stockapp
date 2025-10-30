@@ -130,6 +130,13 @@
         </div>
       {% endif %}
 
+      <div class="card mb-3">
+        <div class="card-body d-flex justify-content-between align-items-center flex-wrap">
+          <div class="font-weight-bold mb-2 mb-md-0">Wallet Balance: ${{ '%.2f' % wallet_balance }}</div>
+          <a class="btn btn-outline-primary btn-sm" href="{{ url_for('account_settings', tab='wallet') }}">Manage Wallet</a>
+        </div>
+      </div>
+
       <div class="row">
         <div class="col-lg-9">
           <div class="card mb-4">
@@ -197,7 +204,7 @@
                             {% endif %}
                           </td>
                           <td class="text-right">
-                            <form method="post" class="d-inline">
+                            <form method="post" class="d-inline sell-form" data-symbol="{{ holding.symbol }}" data-shares="{{ '%.4f' % holding.shares }}">
                               <input type="hidden" name="action" value="delete">
                               <input type="hidden" name="holding_id" value="{{ holding.id }}">
                               <button type="submit" class="btn btn-outline-danger btn-sm" {% if not market_open %}disabled title="Trading is disabled while markets are closed."{% endif %}>Sell</button>
@@ -277,11 +284,12 @@
         </div>
         <div class="col-lg-3">
           <div class="card">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
               <h5 class="mb-0">Buy Stock</h5>
+              <span class="badge badge-pill badge-info">Wallet: ${{ '%.2f' % wallet_balance }}</span>
             </div>
             <div class="card-body">
-              <form method="post">
+              <form method="post" id="buy-form">
                 <div class="form-group">
                   <label for="symbol">Stock Symbol</label>
                   <input type="text" class="form-control" id="symbol" name="symbol" placeholder="e.g. AAPL" autocomplete="off" required>
@@ -294,21 +302,8 @@
                   <label for="shares">Shares</label>
                   <input type="number" step="0.01" min="0.01" class="form-control" id="shares" name="shares" required>
                 </div>
-                <div class="form-group">
-                  <label for="payment_method">Payment Method</label>
-                  <select class="form-control" id="payment_method" name="payment_method" {% if not payment_options %}disabled{% else %}required{% endif %}>
-                    <option value="" selected disabled>Select a payment method</option>
-                    {% for option in payment_options %}
-                      <option value="{{ option.value }}">{{ option.label }}</option>
-                    {% endfor %}
-                  </select>
-                </div>
-                {% if not payment_options %}
-                <div class="alert alert-warning" role="alert">
-                  Add a payment method in <a href="{{ url_for('account_settings') }}" class="alert-link">Account Settings</a> before buying.
-                </div>
-                {% endif %}
                 <button type="submit" class="btn btn-primary btn-block" {% if not market_open %}disabled title="Trading is disabled while markets are closed."{% endif %}>Buy Stock</button>
+                <small class="text-muted d-block mt-2">Purchases draw from your wallet balance.</small>
               </form>
             </div>
           </div>
@@ -325,6 +320,11 @@
       document.addEventListener('DOMContentLoaded', function () {
         var symbolInput = document.getElementById('symbol');
         var lastSaleEl = document.getElementById('last-sale-value');
+        var sharesInput = document.getElementById('shares');
+
+        if (!symbolInput || !lastSaleEl || !sharesInput) {
+          return;
+        }
 
         function resetState() {
           lastSaleEl.textContent = '—';
@@ -376,6 +376,30 @@
           var symbol = symbolInput.value.trim().toUpperCase();
           symbolInput.value = symbol;
           verifySymbol(symbol);
+        });
+
+        var buyForm = document.getElementById('buy-form');
+        if (buyForm) {
+          buyForm.addEventListener('submit', function (event) {
+            var symbolText = symbolInput.value.trim().toUpperCase() || 'this stock';
+            var sharesText = sharesInput.value || '0';
+            var message = 'Are you sure you want to buy ' + sharesText + ' shares of ' + symbolText + ' using wallet funds?';
+            if (!confirm(message)) {
+              event.preventDefault();
+            }
+          });
+        }
+
+        var sellForms = document.querySelectorAll('.sell-form');
+        sellForms.forEach(function (form) {
+          form.addEventListener('submit', function (event) {
+            var formSymbol = form.getAttribute('data-symbol') || 'this stock';
+            var formShares = form.getAttribute('data-shares') || '';
+            var message = 'Are you sure you want to sell ' + (formShares ? formShares + ' shares of ' : '') + formSymbol + '?';
+            if (!confirm(message)) {
+              event.preventDefault();
+            }
+          });
         });
       });
     </script>
