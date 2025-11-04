@@ -1,5 +1,5 @@
 from flask import Flask, render_template, redirect, url_for, flash, request, jsonify, session
-from flask_bootstrap import Bootstrap4
+from flask_bootstrap import Bootstrap
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -8,7 +8,7 @@ from math import ceil
 from sqlalchemy import func
 
 app = Flask(__name__)
-bootstrap = Bootstrap4(app)
+bootstrap = Bootstrap(app)
 
 # ------------------------- Config -------------------------
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:password@localhost/flask_db'
