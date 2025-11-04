@@ -160,7 +160,6 @@
                   Dashboard <span class="sr-only">(current)</span>
                 </a>
               </li>
-
               <li class="nav-item">
                 <a class="nav-link" href="/portfolio">
                   <span data-feather="briefcase"></span>
@@ -168,62 +167,28 @@
                 </a>
               </li>
               <li class="nav-item">
-                <a class="nav-link" href="#">
-                  <span data-feather="shopping-cart"></span>
-                  Products
-                </a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link" href="{{ url_for('account_settings') }}">
-                  <span data-feather="users"></span>
-                  Account Settings
-                </a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link" href="#">
+                <a class="nav-link" href="{{ url_for('reports') }}">
                   <span data-feather="bar-chart-2"></span>
                   Reports
                 </a>
               </li>
-              <li class="nav-item">
-                <a class="nav-link" href="#">
-                  <span data-feather="layers"></span>
-                  Integrations
-                </a>
-              </li>
-            </ul>
-
-            <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-              <span>Saved reports</span>
-              <a class="d-flex align-items-center text-muted" href="#">
-                <span data-feather="plus-circle"></span>
-              </a>
+              {% if session.get('is_admin') %}
+              <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
+              <span>ADMIN</span>
             </h6>
-            <ul class="nav flex-column mb-2">
               <li class="nav-item">
-                <a class="nav-link" href="#">
-                  <span data-feather="file-text"></span>
-                  Current month
+                <a class="nav-link" href="{{ url_for('admin_portal') }}">
+                  <span data-feather="shield"></span>
+                  Admin Portal
                 </a>
               </li>
               <li class="nav-item">
-                <a class="nav-link" href="#">
-                  <span data-feather="file-text"></span>
-                  Last quarter
+                <a class="nav-link" href="{{ url_for('admin_customers') }}">
+                  <span data-feather="user-check"></span>
+                  Customers
                 </a>
               </li>
-              <li class="nav-item">
-                <a class="nav-link" href="#">
-                  <span data-feather="file-text"></span>
-                  Social engagement
-                </a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link" href="#">
-                  <span data-feather="file-text"></span>
-                  Year-end sale
-                </a>
-              </li>
+              {% endif %}
             </ul>
             {% if session.get('user_id') %}
             <div class="mt-auto px-3 pb-3">
@@ -234,7 +199,6 @@
             {% endif %}
           </div>
         </nav>
-
         <main role="main" class="col-md-9 ml-sm-auto col-lg-10 pt-3 px-4">
           <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pb-2 mb-3 border-bottom">
             <h1 class="h2">Dashboard</h1>
