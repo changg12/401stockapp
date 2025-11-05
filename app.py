@@ -30,7 +30,7 @@ DEFAULT_MARKET_CLOSE_TIME = time(16, 0)
 RANDOM_PRICE_MAX_CHANGE = 50.0  # percent bounds for daily move
 RANDOM_PRICE_STDDEV = 10.0  # bell curve spread (standard deviation)
 RANDOM_PRICE_QUANTUM = 0.01  # enforce 0.01% increments
-RANDOM_PRICE_CHECK_INTERVAL = 120  # poll every 120 seconds
+RANDOM_PRICE_CHECK_INTERVAL = 180  # run every 180 seconds
 
 _random_price_thread = None
 _random_price_lock = threading.Lock()
@@ -62,6 +62,7 @@ class User(db.Model):
     checking_routing_number = db.Column(db.String(9))
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
+    wallet_balance = db.Column(db.Float, default=0.0, nullable=False)
 
 
 
@@ -582,6 +583,21 @@ def reports():
             continue
         total_market_value += (holding.shares or 0) * price
 
+    total_buy_value = sum(float(trade.total_value or 0) for trade in trades if trade.transaction_type.upper() == "BUY")
+    total_sell_value = sum(float(trade.total_value or 0) for trade in trades if trade.transaction_type.upper() == "SELL")
+
+    realized_cost = total_buy_value - total_cost_basis
+    if realized_cost < 0:
+        realized_cost = 0.0
+
+    total_performance = total_sell_value - realized_cost
+    if realized_cost > 0:
+        total_performance_pct = (total_performance / realized_cost) * 100.0
+    elif total_performance == 0:
+        total_performance_pct = 0.0
+    else:
+        total_performance_pct = None
+
     enriched_holdings = []
     for holding in holdings:
         symbol_key = holding.symbol.upper()
@@ -749,6 +765,11 @@ def reports():
         chart_market_values=chart_market_values,
         total_cost_basis=total_cost_basis,
         total_market_value=total_market_value,
+        total_buy_value=total_buy_value,
+        total_sell_value=total_sell_value,
+        total_performance=total_performance,
+        total_performance_pct=total_performance_pct,
+        realized_cost=realized_cost,
         period_definitions=period_definitions,
         performance_rows=performance_rows,
         portfolio_performance=portfolio_performance,
@@ -818,8 +839,78 @@ def account_settings():
         flash("User not found. Please sign in again.", "danger")
         return redirect(url_for("login"))
 
+    active_tab = request.args.get("tab") or (request.form.get("tab") if request.method == "POST" else None) or "profile"
+
+    payment_methods = []
+    if user.credit_card_last4:
+        payment_methods.append({
+            "value": "credit_card",
+            "label": f"Credit Card ending in {user.credit_card_last4}",
+        })
+    if user.checking_account_last4:
+        payment_methods.append({
+            "value": "checking_account",
+            "label": f"Checking Account ending in {user.checking_account_last4}",
+        })
+
     if request.method == "POST":
+        form_type = request.form.get("form_type", "profile")
+        if form_type == "wallet":
+            amount_raw = (request.form.get("wallet_amount") or "").strip()
+            action = request.form.get("wallet_action")
+            payment_source = request.form.get("wallet_payment_source")
+
+            errors = []
+
+            try:
+                amount_value = float(amount_raw)
+            except ValueError:
+                amount_value = None
+
+            if amount_value is None or amount_value <= 0:
+                errors.append("Enter a positive amount to process.")
+
+            if payment_source not in {method["value"] for method in payment_methods}:
+                errors.append("Select a valid funding source.")
+
+            if action not in {"deposit", "withdraw"}:
+                errors.append("Choose whether to deposit or withdraw.")
+
+            if not errors and action == "withdraw" and amount_value > user.wallet_balance:
+                errors.append("Insufficient wallet balance for withdrawal.")
+
+            if errors:
+                for message in errors:
+                    flash(message, "danger")
+                return render_template(
+                    "account_settings.html",
+                    user=user,
+                    form_data={
+                        "email": user.email or "",
+                        "address": user.address or "",
+                        "phone_number": user.phone_number or "",
+                        "credit_card_name": user.credit_card_name or "",
+                        "credit_card_expiration": user.credit_card_expiration or "",
+                        "checking_account_name": user.checking_account_name or "",
+                        "checking_routing_number": user.checking_routing_number or "",
+                    },
+                    active_tab="wallet",
+                    payment_methods=payment_methods,
+                    wallet_balance=user.wallet_balance,
+                )
+
+            if action == "deposit":
+                user.wallet_balance += amount_value
+                flash(f"Deposited ${amount_value:.2f} into wallet.", "success")
+            else:
+                user.wallet_balance -= amount_value
+                flash(f"Withdrew ${amount_value:.2f} from wallet.", "success")
+
+            db.session.commit()
+            return redirect(url_for("account_settings", tab="wallet"))
+
         form = request.form
+        active_tab = "profile"
         email = (form.get("email") or "").strip()
         address = (form.get("address") or "").strip()
         phone_number = (form.get("phone_number") or "").strip()
@@ -921,7 +1012,14 @@ def account_settings():
         if errors:
             for message in errors:
                 flash(message, "danger")
-            return render_template("account_settings.html", user=user, form_data=form)
+            return render_template(
+                "account_settings.html",
+                user=user,
+                form_data=form,
+                active_tab="profile",
+                payment_methods=payment_methods,
+                wallet_balance=user.wallet_balance,
+            )
 
         user.email = email
         user.address = address
@@ -940,7 +1038,7 @@ def account_settings():
         db.session.commit()
 
         flash("Account settings updated.", "success")
-        return redirect(url_for("account_settings"))
+        return redirect(url_for("account_settings", tab="profile"))
 
     form_data = {
         "email": user.email or "",
@@ -952,7 +1050,14 @@ def account_settings():
         "checking_routing_number": user.checking_routing_number or "",
     }
 
-    return render_template("account_settings.html", user=user, form_data=form_data)
+    return render_template(
+        "account_settings.html",
+        user=user,
+        form_data=form_data,
+        active_tab=active_tab,
+        payment_methods=payment_methods,
+        wallet_balance=user.wallet_balance,
+    )
 
 @app.route("/admin", methods=["GET", "POST"])
 def admin_portal():
@@ -1328,24 +1433,6 @@ def portfolio():
     market_open = market_status.get("is_open")
     market_notice = format_market_notice(market_status) if not market_open else None
 
-    payment_options = []
-
-    if user.credit_card_last4:
-        card_name = user.credit_card_name or "Credit Card"
-        payment_options.append({
-            "value": "credit_card",
-            "label": f"{card_name} ending in {user.credit_card_last4}",
-        })
-
-    if user.checking_account_last4:
-        account_name = user.checking_account_name or "Checking Account"
-        payment_options.append({
-            "value": "checking_account",
-            "label": f"{account_name} ending in {user.checking_account_last4}",
-        })
-
-    payment_option_lookup = {option["value"]: option["label"] for option in payment_options}
-
     if request.method == "POST":
         market_status = get_market_status()
         if not market_status.get("is_open"):
@@ -1384,9 +1471,11 @@ def portfolio():
 
             total_value = float(holding.shares or 0) * price_value
 
+            symbol_str = holding.symbol.upper()
+
             trade_entry = Trade(
                 user_id=user_id,
-                symbol=holding.symbol.upper(),
+                symbol=symbol_str,
                 shares=holding.shares,
                 price=price_value,
                 total_value=total_value,
@@ -1396,20 +1485,10 @@ def portfolio():
             db.session.add(trade_entry)
 
             db.session.delete(holding)
+            user.wallet_balance += total_value
             db.session.commit()
-            flash(f"Sold {holding.symbol}. Deposited to your credit card or checking account.", "info")
+            flash(f"Sold {symbol_str}. ${total_value:.2f} added to your wallet.", "info")
             return redirect(url_for("portfolio"))
-
-        if not payment_options:
-            flash("Please add a payment method in Account Settings before buying.", "warning")
-            return redirect(url_for("portfolio"))
-
-        selected_payment_method = (request.form.get("payment_method") or "").strip()
-        if selected_payment_method not in payment_option_lookup:
-            flash("Select a saved payment method before buying.", "warning")
-            return redirect(url_for("portfolio"))
-
-        selected_payment_label = payment_option_lookup[selected_payment_method]
 
         symbol = (request.form.get("symbol") or "").upper().strip()
         shares = request.form.get("shares")
@@ -1439,6 +1518,11 @@ def portfolio():
                     flash("Last sale price must be a positive number.", "danger")
                     return redirect(url_for("portfolio"))
 
+                total_cost = shares_value * price_value
+                if user.wallet_balance < total_cost:
+                    flash("Insufficient wallet balance. Deposit funds into your wallet before buying.", "warning")
+                    return redirect(url_for("portfolio"))
+
                 holding = PortfolioHolding.query.filter_by(user_id=user_id, symbol=symbol).first()
 
                 if holding:
@@ -1448,7 +1532,7 @@ def portfolio():
                     ) / total_shares
                     holding.shares = total_shares
                     holding.updated_at = datetime.utcnow()
-                    flash(f"Updated stock holding for {symbol} using {selected_payment_label}.", "info")
+                    flash(f"Updated stock holding for {symbol}.", "info")
                 else:
                     holding = PortfolioHolding(
                         user_id=user_id,
@@ -1457,16 +1541,18 @@ def portfolio():
                         average_price=price_value,
                     )
                     db.session.add(holding)
-                    flash(f"Added {symbol} to your portfolio using {selected_payment_label}.", "success")
+                    flash(f"Added {symbol} to your portfolio using wallet funds.", "success")
 
                 trade_entry = Trade(
                     user_id=user_id,
                     symbol=symbol,
                     shares=shares_value,
                     price=price_value,
-                    total_value=shares_value * price_value,
+                    total_value=total_cost,
                     transaction_type="BUY",
                 )
+
+                user.wallet_balance -= total_cost
 
                 db.session.add(trade_entry)
                 db.session.commit()
@@ -1546,10 +1632,10 @@ def portfolio():
         total_cost_basis=total_cost_basis,
         total_market_value=total_market_value,
         unrealized_pl=unrealized_pl,
-        payment_options=payment_options,
         market_open=market_open,
         market_notice=market_notice,
         market_status=market_status,
+        wallet_balance=user.wallet_balance,
         ipo_stocks=ipo_stocks,
     )
 # End of portfolio management routes
