@@ -16,7 +16,7 @@ app = Flask(__name__)
 bootstrap = Bootstrap(app)
 
 # Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:password@localhost/flask_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://admin:password@flaskdb.cxewmo2iqc1i.us-east-1.rds.amazonaws.com/flask_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'awdasdawdasdawdasdawdasd'
 
