@@ -1,152 +1,826 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-from flask_sqlalchemy import SQLAlchemy
+from flask import Flask, render_template, redirect, url_for, flash, request, jsonify, abort
 from flask_bootstrap import Bootstrap
+from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, time
+from flask import session
+from datetime import datetime, date, time, timedelta
+from math import ceil
+from sqlalchemy import func
+import os
+import random
+import threading
+import time as time_module
 import pytz
 
 app = Flask(__name__)
-<<<<<<< Updated upstream
-=======
 bootstrap = Bootstrap(app)
 
 # Database configuration
->>>>>>> Stashed changes
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:password@localhost/flask_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://admin:password@flaskdb.cxewmo2iqc1i.us-east-1.rds.amazonaws.com/flask_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'awdasdawdasdawdasdawdasd'
 
 db = SQLAlchemy(app)
-Bootstrap(app)
+
 
 MARKET_TZ = pytz.timezone("America/New_York")
 DEFAULT_MARKET_OPEN_TIME = time(9, 30)
 DEFAULT_MARKET_CLOSE_TIME = time(16, 0)
 
-# --------------------- MODELS ---------------------
+RANDOM_PRICE_MAX_CHANGE = 50.0  # percent bounds for daily move
+RANDOM_PRICE_STDDEV = 10.0  # bell curve spread (standard deviation)
+RANDOM_PRICE_QUANTUM = 0.01  # enforce 0.01% increments
+RANDOM_PRICE_CHECK_INTERVAL = 30  # run every 180 seconds
+
+_random_price_thread = None
+_random_price_lock = threading.Lock()
+#_random_price_last_run_date = None
+
+
+def shift_month_start(reference: datetime, months: int) -> datetime:
+    """Return the first day of the month offset by `months` from `reference`."""
+    month_index = (reference.month - 1) + months
+    year = reference.year + month_index // 12
+    month = (month_index % 12) + 1
+    return datetime(year, month, 1)
+
+
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    full_name = db.Column(db.String(100))
-    email = db.Column(db.String(120), unique=True, nullable=False)
+    full_name = db.Column(db.String(100), nullable=False)
+    first_name = db.Column(db.String(50))
+    last_name = db.Column(db.String(50))
+    email = db.Column(db.String(255), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    phone_number = db.Column(db.String(15))
+    phone_number = db.Column(db.String(20))
     address = db.Column(db.String(255))
+    credit_card_name = db.Column(db.String(100))
     credit_card_last4 = db.Column(db.String(4))
+    credit_card_expiration = db.Column(db.String(7))
+    checking_account_name = db.Column(db.String(100))
     checking_account_last4 = db.Column(db.String(4))
+    checking_routing_number = db.Column(db.String(9))
+    is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    wallet_balance = db.Column(db.Float, default=0.0, nullable=False)
+
+
+
+class SavedPaymentInfo(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    
+    
+    first_name = db.Column(db.String(50), nullable=False)
+    last_name = db.Column(db.String(50), nullable=False)
+    username = db.Column(db.String(50), nullable=False)
+    email = db.Column(db.String(255), nullable=True)
+    address = db.Column(db.String(255), nullable=False)
+    address2 = db.Column(db.String(255), nullable=True)
+    country = db.Column(db.String(50), nullable=False)
+    state = db.Column(db.String(50), nullable=False)
+    zip_code = db.Column(db.String(20), nullable=False)
+    
+    
+    payment_method = db.Column(db.String(20), nullable=False)  
+    card_name = db.Column(db.String(100), nullable=True)
+    card_number_last4 = db.Column(db.String(4), nullable=True)  
+    card_expiration = db.Column(db.String(7), nullable=True)  
+    
+    
+    same_address = db.Column(db.Boolean, default=False)
+    
+    
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    
+    __table_args__ = (db.UniqueConstraint('user_id', name='unique_user_saved_payment'),)
+
 
 class PortfolioHolding(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer)
-    symbol = db.Column(db.String(10))
-    shares = db.Column(db.Float)
-    average_price = db.Column(db.Float)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    symbol = db.Column(db.String(10), nullable=False)
+    shares = db.Column(db.Float, nullable=False)
+    average_price = db.Column(db.Float, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-class Transactions(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'symbol', name='unique_symbol_per_user'),
+    )
+
+
+class Trade(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer)
-    symbol = db.Column(db.String(10))
-    transaction_type = db.Column(db.String(10))
-    shares = db.Column(db.Float)
-    price = db.Column(db.Float)
-    total_amount = db.Column(db.Float)
-    transaction_date = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    symbol = db.Column(db.String(10), nullable=False)
+    shares = db.Column(db.Float, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    total_value = db.Column(db.Float, nullable=False)
+    transaction_type = db.Column(db.String(10), nullable=False)  # BUY or SELL
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
-class StockSymbols(db.Model):
-    symbol = db.Column(db.String(10), primary_key=True)
-    market = db.Column(db.String(50))
-    name = db.Column(db.String(100))
+
+class UserLoginLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    login_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    logout_at = db.Column(db.DateTime)
+
+
+class MarketScheduleOverride(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, unique=True, nullable=False)
+    is_closed = db.Column(db.Boolean, default=False, nullable=False)
+    open_time = db.Column(db.Time)
+    close_time = db.Column(db.Time)
+    note = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+def get_current_user():
+    user_id = session.get('user_id')
+    if not user_id:
+        return None
+    return User.query.get(user_id)
+
+
+def require_admin_access():
+    user = get_current_user()
+    if not user:
+        flash("Please log in to access the admin portal.", "warning")
+        return False, redirect(url_for("login"))
+
+    if not user.is_admin:
+        flash("Administrator rights are required to view this page.", "danger")
+        return False, redirect(url_for("home"))
+
+    return True, user
+
+
+def get_market_schedule_for_day(target_date):
+    override = MarketScheduleOverride.query.filter_by(date=target_date).first()
+
+    schedule = {
+        "date": target_date,
+        "is_closed": False,
+        "open_time": DEFAULT_MARKET_OPEN_TIME,
+        "close_time": DEFAULT_MARKET_CLOSE_TIME,
+        "note": None,
+        "override": override,
+    }
+
+    # Weekend default closure unless an override opens the market explicitly
+    if target_date.weekday() >= 5:
+        schedule["is_closed"] = True
+        schedule["note"] = "Weekend closure"
+
+    if override:
+        schedule["is_closed"] = bool(override.is_closed)
+        if override.note:
+            schedule["note"] = override.note
+
+        if not override.is_closed:
+            if override.open_time:
+                schedule["open_time"] = override.open_time
+            if override.close_time:
+                schedule["close_time"] = override.close_time
+            if not override.note:
+                schedule["note"] = None
+        else:
+            schedule["open_time"] = override.open_time
+            schedule["close_time"] = override.close_time
+
+    return schedule
+
+
+def find_next_opening(start_date, reference_dt=None):
+    # Search upcoming days for an open market session
+    reference_dt = reference_dt or datetime.now(MARKET_TZ)
+    for offset in range(0, 14):
+        day = start_date + timedelta(days=offset)
+        schedule = get_market_schedule_for_day(day)
+        if schedule["is_closed"]:
+            continue
+
+        open_time = schedule.get("open_time") or DEFAULT_MARKET_OPEN_TIME
+        open_dt = MARKET_TZ.localize(datetime.combine(day, open_time))
+        if open_dt >= reference_dt:
+            return open_dt
+
+    return None
+
+
+def get_market_status(reference=None):
+    now = reference or datetime.now(MARKET_TZ)
+    today = now.date()
+
+    schedule = get_market_schedule_for_day(today)
+
+    status = {
+        "is_open": False,
+        "message": None,
+        "opens_at": None,
+        "closes_at": None,
+        "next_open": None,
+        "note": schedule.get("note"),
+    }
+
+    if schedule["is_closed"] or not schedule.get("open_time") or not schedule.get("close_time"):
+        note = schedule.get("note")
+        if note:
+            status["message"] = f"{note}. Trading is currently disabled."
+        else:
+            status["message"] = "Markets are closed today. Trading is currently disabled."
+        status["next_open"] = find_next_opening(today + timedelta(days=1), reference_dt=now)
+        return status
+
+    open_time = schedule["open_time"] or DEFAULT_MARKET_OPEN_TIME
+    close_time = schedule["close_time"] or DEFAULT_MARKET_CLOSE_TIME
+
+    open_dt = MARKET_TZ.localize(datetime.combine(today, open_time))
+    close_dt = MARKET_TZ.localize(datetime.combine(today, close_time))
+
+    status["opens_at"] = open_dt
+    status["closes_at"] = close_dt
+
+    if open_dt <= now <= close_dt:
+        status["is_open"] = True
+        status["message"] = None
+        status["next_open"] = open_dt
+        return status
+
+    if now < open_dt:
+        status["message"] = "Markets are not open yet. Trading remains disabled until the session begins."
+        status["next_open"] = open_dt
+    else:
+        status["message"] = "Markets are closed for the day. Trading will resume next session."
+        status["next_open"] = find_next_opening(today + timedelta(days=1), reference_dt=now)
+
+    return status
+
+
+def format_market_notice(status):
+    message = status.get("message") or "Markets are currently closed. Trading is disabled."
+    next_open = status.get("next_open")
+    if next_open:
+        next_label = next_open.strftime('%A, %B %d at %I:%M %p %Z').lstrip('0')
+        message = f"{message} Next session begins {next_label}."
+    return message
+
+
+def build_customer_activity_summary():
+    users = User.query.order_by(User.full_name.asc()).all()
+    if not users:
+        return []
+
+    now = datetime.utcnow()
+    year_start = datetime(now.year, 1, 1)
+    month_start = datetime(now.year, now.month, 1)
+
+    from calendar import monthrange
+
+    days_in_month = monthrange(now.year, now.month)[1]
+
+    # Pre-seed metrics for each user to ensure deterministic ordering
+    metrics = {
+        user.id: {
+            "display_name": user.full_name or user.email,
+            "year_buy_total": 0.0,
+            "year_sell_total": 0.0,
+            "month_buy_total": 0.0,
+            "month_sell_total": 0.0,
+            "month_buy_daily_avg": 0.0,
+            "month_sell_daily_avg": 0.0,
+            "month_profit_loss": 0.0,
+        }
+        for user in users
+    }
+
+    # Fetch all trades from the start of the year to avoid multiple queries
+    yearly_trades = Trade.query.filter(Trade.created_at >= year_start).all()
+
+    for trade in yearly_trades:
+        user_metrics = metrics.get(trade.user_id)
+        if not user_metrics:
+            continue
+
+        is_buy = (trade.transaction_type or "").upper() == "BUY"
+
+        if is_buy:
+            user_metrics["year_buy_total"] += float(trade.total_value or 0)
+        else:
+            user_metrics["year_sell_total"] += float(trade.total_value or 0)
+
+        if trade.created_at >= month_start:
+            if is_buy:
+                user_metrics["month_buy_total"] += float(trade.total_value or 0)
+            else:
+                user_metrics["month_sell_total"] += float(trade.total_value or 0)
+
+    for data in metrics.values():
+        if days_in_month:
+            data["month_buy_daily_avg"] = data["month_buy_total"] / days_in_month
+            data["month_sell_daily_avg"] = data["month_sell_total"] / days_in_month
+        data["month_profit_loss"] = data["month_sell_total"] - data["month_buy_total"]
+
+    return list(metrics.values())
+
+# Stock symbols data from https://github.com/rreichel3/US-Stock-Symbols/tree/main
+# Please use your own database and import the flask_db_stock_symbols.sql file for testing
+class StockSymbol(db.Model):
+    __tablename__ = 'stock_symbols'
+    __table_args__ = {'extend_existing': True}
+
+    market = db.Column(db.String(10), primary_key=True)
+    symbol = db.Column(db.String(16), primary_key=True)
+    name = db.Column(db.Text)
     lastsale = db.Column(db.Float)
     netchange = db.Column(db.Float)
     pctchange = db.Column(db.Float)
-    volume = db.Column(db.BigInteger)
-    marketCap = db.Column(db.BigInteger)
-    country = db.Column(db.String(50))
-    industry = db.Column(db.String(100))
-    sector = db.Column(db.String(100))
+    volume = db.Column(db.Float)
+    market_cap = db.Column('marketCap', db.Float)
+    country = db.Column(db.Text)
+    industry = db.Column(db.Text)
+    sector = db.Column(db.Text)
+    createdate = db.Column('createdate', db.DateTime, nullable=True, default=datetime.utcnow)
 
-# --------------------- HELPERS ---------------------
-def is_logged_in():
-    return session.get("user_id") is not None
+# Random Stock Price Generator based on Bell Curve (Gaussian distribution) centered zero (0.0) on the market open days.
+def _generate_random_percent_change():
+    change = random.gauss(0.0, RANDOM_PRICE_STDDEV)
+    change = max(min(change, RANDOM_PRICE_MAX_CHANGE), -RANDOM_PRICE_MAX_CHANGE)
+    quantized = round(change / RANDOM_PRICE_QUANTUM) * RANDOM_PRICE_QUANTUM
+    if quantized > RANDOM_PRICE_MAX_CHANGE:
+        return RANDOM_PRICE_MAX_CHANGE
+    if quantized < -RANDOM_PRICE_MAX_CHANGE:
+        return -RANDOM_PRICE_MAX_CHANGE
+    return quantized
 
-def is_market_open():
-    now = datetime.now(MARKET_TZ).time()
-    return DEFAULT_MARKET_OPEN_TIME <= now <= DEFAULT_MARKET_CLOSE_TIME
 
-# --------------------- ROUTES ---------------------
-@app.route('/')
-def home():
-    redirect_after = request.args.get('redirect_after', False)
-    stocks = StockSymbols.query.limit(50).all()
-    return render_template('stock.html', stocks=stocks, markets=[], stocks_by_market={}, market_pagination={}, avg_pct_change=[], redirect_after=redirect_after)
+def _apply_random_price_adjustments():
+    stocks = StockSymbol.query.all()
+    updated = 0
 
-@app.route('/signup', methods=['GET', 'POST'])
-def signup():
-    if request.method == 'POST':
-        full_name = request.form['full_name']
-        email = request.form['email']
-        password = request.form['password']
-        confirm = request.form['confirm_password']
+    for stock in stocks:
+        previous_price = stock.lastsale
+        if previous_price is None or previous_price <= 0:
+            stock.netchange = 0.0
+            stock.pctchange = 0.0
+            continue
 
-        if password != confirm:
-            flash("Passwords do not match", "danger")
-            return render_template('signup.html')
+        percent_change = _generate_random_percent_change()
+        adjustment_factor = 1 + (percent_change / 100.0) 
+        new_price = max(previous_price * adjustment_factor, 0.0)
+        new_price = round(new_price, 2) 
 
-        # Create and save the new user
-        user = User(full_name=full_name, email=email, password_hash=generate_password_hash(password))
-        db.session.add(user)
+        stock.lastsale = new_price
+        stock.netchange = round(new_price - previous_price, 4) #netchange: round to 4 decimal like $11.4539
+        stock.pctchange = round(percent_change, 2) #percent change: round to 2 decimal like 11.35, the increment is 0.01%
+        updated += 1
+
+    if not updated:
+        return
+
+    try:
         db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
 
-        # Log in the user immediately
-        session['user_id'] = user.id
-        session['full_name'] = user.full_name
+    app.logger.info("Random stock price generator updated %s symbols", updated)
 
-        flash("Signup successful", "success")
-        return redirect(url_for('home', redirect_after=True))
 
-    return render_template('signup.html')
+def _random_price_generator_loop():
+    with app.app_context():
+        while True:
+            market_status = get_market_status()
+            if market_status.get("is_open"):
+                try:
+                    _apply_random_price_adjustments()
+                except Exception: 
+                    app.logger.exception("Random stock price generator failed")            
+            time_module.sleep(RANDOM_PRICE_CHECK_INTERVAL)
 
-@app.route('/login', methods=['GET', 'POST'])
+def start_random_price_generator():
+    global _random_price_thread
+    with _random_price_lock:
+        if _random_price_thread and _random_price_thread.is_alive():
+            return
+
+        _random_price_thread = threading.Thread(
+            target=_random_price_generator_loop,
+            name="RandomPriceGenerator",
+            daemon=True,
+        )
+        _random_price_thread.start()
+
+@app.route("/")
+def home():
+    markets = ["NASDAQ", "NYSE", "AMEX"]
+
+    avg_pct_change = []
+    for market in markets:
+        sum_value, count_value = (
+            db.session.query(
+                func.coalesce(func.sum(StockSymbol.pctchange), 0),
+                func.count(StockSymbol.symbol),
+            )
+            .filter(StockSymbol.market == market)
+            .one()
+        )
+
+        avg_value = sum_value / count_value if count_value else 0
+        avg_pct_change.append(round(avg_value, 4))
+
+    per_page = 150
+    stocks_by_market = {}
+    market_pagination = {}
+    existing_args = request.args.to_dict()
+
+    for market in markets:
+        param_name = f"{market.lower()}_page"
+        page = request.args.get(param_name, default=1, type=int)
+
+        base_query = StockSymbol.query.filter_by(market=market).order_by(StockSymbol.symbol)
+        total_items = base_query.count()
+        total_pages = max(ceil(total_items / per_page), 1) if total_items else 1
+
+        if page < 1:
+            page = 1
+        elif page > total_pages:
+            page = total_pages
+
+        symbols = (
+            base_query
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+            .all()
+        )
+
+        def build_page_items(current_page, total_pages_count):
+            if total_pages_count <= 7:
+                return [
+                    {"number": num, "ellipsis": False}
+                    for num in range(1, total_pages_count + 1)
+                ]
+
+            items = []
+
+            def add_number(num):
+                if not any(entry.get("number") == num for entry in items):
+                    items.append({"number": num, "ellipsis": False})
+
+            add_number(1)
+
+            if current_page > 4:
+                items.append({"number": None, "ellipsis": True})
+
+            for num in range(current_page - 1, current_page + 2):
+                if 1 < num < total_pages_count:
+                    add_number(num)
+
+            if current_page < total_pages_count - 3:
+                items.append({"number": None, "ellipsis": True})
+
+            add_number(total_pages_count)
+            return items
+
+        page_items = build_page_items(page, total_pages)
+
+        pagination_links = []
+        for item in page_items:
+            if item["ellipsis"]:
+                pagination_links.append({"label": "…", "active": False, "disabled": True})
+            else:
+                args = existing_args.copy()
+                args[param_name] = item["number"]
+                url = url_for("home", **args)
+                pagination_links.append(
+                    {
+                        "label": str(item["number"]),
+                        "url": url,
+                        "active": item["number"] == page,
+                        "disabled": False,
+                    }
+                )
+
+        prev_args = existing_args.copy()
+        prev_args[param_name] = max(page - 1, 1)
+        next_args = existing_args.copy()
+        next_args[param_name] = min(page + 1, total_pages)
+
+        market_pagination[market] = {
+            "page": page,
+            "total_pages": total_pages,
+            "total_items": total_items,
+            "per_page": per_page,
+            "prev_url": url_for("home", **prev_args),
+            "next_url": url_for("home", **next_args),
+            "has_prev": page > 1,
+            "has_next": page < total_pages,
+            "links": pagination_links,
+            "param_name": param_name,
+        }
+
+        stocks_by_market[market] = symbols
+
+    return render_template(
+        "stock.html",
+        markets=markets,
+        avg_pct_change=avg_pct_change,
+        stocks_by_market=stocks_by_market,
+        market_pagination=market_pagination,
+    )
+
+
+
+@app.route("/reports")
+def reports():
+    if 'user_id' not in session:
+        flash("Please log in to view reports.", "warning")
+        return redirect(url_for("login"))
+
+    user_id = session['user_id']
+
+    holdings = (
+        PortfolioHolding.query
+        .filter_by(user_id=user_id)
+        .order_by(PortfolioHolding.symbol)
+        .all()
+    )
+
+    total_cost_basis = sum((holding.shares or 0) * (holding.average_price or 0) for holding in holdings)
+
+    symbol_set = {holding.symbol.upper() for holding in holdings}
+
+    trades = (
+        Trade.query
+        .filter_by(user_id=user_id)
+        .order_by(Trade.created_at.asc())
+        .all()
+    )
+
+    symbol_set.update(trade.symbol.upper() for trade in trades)
+
+    stock_rows = []
+    if symbol_set:
+        stock_rows = (
+            StockSymbol.query
+            .filter(StockSymbol.symbol.in_(symbol_set))
+            .all()
+        )
+
+    stock_lookup = {row.symbol.upper(): row for row in stock_rows}
+    price_lookup = {symbol: (row.lastsale or 0.0) for symbol, row in stock_lookup.items()}
+
+    total_market_value = 0.0
+    for holding in holdings:
+        price = price_lookup.get(holding.symbol.upper())
+        if price is None:
+            continue
+        total_market_value += (holding.shares or 0) * price
+
+    total_buy_value = sum(float(trade.total_value or 0) for trade in trades if trade.transaction_type.upper() == "BUY")
+    total_sell_value = sum(float(trade.total_value or 0) for trade in trades if trade.transaction_type.upper() == "SELL")
+
+    realized_cost = total_buy_value - total_cost_basis
+    if realized_cost < 0:
+        realized_cost = 0.0
+
+    total_performance = total_sell_value - realized_cost
+    if realized_cost > 0:
+        total_performance_pct = (total_performance / realized_cost) * 100.0
+    elif total_performance == 0:
+        total_performance_pct = 0.0
+    else:
+        total_performance_pct = None
+
+    enriched_holdings = []
+    for holding in holdings:
+        symbol_key = holding.symbol.upper()
+        stock = stock_lookup.get(symbol_key)
+        current_price = stock.lastsale if stock and stock.lastsale is not None else None
+        shares_value = float(holding.shares or 0)
+        current_value = shares_value * current_price if current_price is not None else None
+        average_price = holding.average_price if holding.average_price is not None else None
+        cost_value = shares_value * average_price if average_price is not None else None
+
+        enriched_holdings.append(
+            {
+                "holding": holding,
+                "stock": stock,
+                "current_price": current_price,
+                "current_value": current_value,
+                "cost_value": cost_value,
+                "average_price": average_price,
+                "pct_change": stock.pctchange if stock else None,
+                "market": stock.market if stock else None,
+            }
+        )
+
+    timeline = []
+
+    def snapshot(timestamp: datetime, state: dict):
+        total_cost = sum(item["cost"] for item in state.values())
+        total_value = 0.0
+        for symbol_key, data in state.items():
+            price = price_lookup.get(symbol_key, 0.0)
+            total_value += price * data["shares"]
+        timeline.append({
+            "timestamp": timestamp,
+            "cost": total_cost,
+            "value": total_value,
+        })
+
+    holdings_state = {}
+
+    if trades:
+        first_trade_time = trades[0].created_at - timedelta(seconds=1)
+        snapshot(first_trade_time, holdings_state)
+
+    for trade in trades:
+        symbol_key = trade.symbol.upper()
+        state = holdings_state.setdefault(symbol_key, {"shares": 0.0, "cost": 0.0})
+        shares = float(trade.shares or 0)
+        total_value = float(trade.total_value or 0)
+
+        if trade.transaction_type.upper() == "BUY":
+            state["shares"] += shares
+            state["cost"] += total_value
+        else:
+            shares_to_sell = min(state["shares"], shares)
+            if shares_to_sell > 0:
+                avg_cost = state["cost"] / state["shares"] if state["shares"] else 0.0
+                state["shares"] -= shares_to_sell
+                state["cost"] -= avg_cost * shares_to_sell
+
+        snapshot(trade.created_at, holdings_state)
+
+    current_snapshot_time = datetime.utcnow()
+    current_snapshot_state = {}
+    for holding in holdings:
+        current_snapshot_state[holding.symbol.upper()] = {
+            "shares": float(holding.shares or 0),
+            "cost": float((holding.shares or 0) * (holding.average_price or 0)),
+        }
+
+    snapshot(current_snapshot_time, current_snapshot_state)
+
+    timeline.sort(key=lambda entry: entry["timestamp"])
+
+    if not timeline:
+        timeline.append({
+            "timestamp": current_snapshot_time,
+            "cost": total_cost_basis,
+            "value": total_market_value,
+        })
+
+    chart_labels = [entry["timestamp"].strftime("%Y-%m-%d %H:%M") for entry in timeline]
+    chart_cost_values = [round(entry["cost"], 2) for entry in timeline]
+    chart_market_values = [round(entry["value"], 2) for entry in timeline]
+
+    def latest_snapshot_before(target: datetime):
+        selected = None
+        for entry in timeline:
+            if entry["timestamp"] <= target:
+                selected = entry
+            else:
+                break
+        return selected
+
+    current_snapshot = timeline[-1]
+
+    now = datetime.utcnow()
+    month_start = datetime(now.year, now.month, 1)
+    six_month_start = shift_month_start(month_start, -5)
+    year_start = datetime(now.year, 1, 1)
+
+    period_definitions = [
+        ("month", "Calendar Month", month_start, 21),
+        ("six_month", "Last 6 Months", six_month_start, 126),
+        ("year", "Year to Date", year_start, 252),
+    ]
+
+    def compute_portfolio_growth(start_dt: datetime):
+        baseline = latest_snapshot_before(start_dt)
+        base_value = baseline["value"] if baseline else 0.0
+        current_value = current_snapshot["value"]
+        abs_change = current_value - base_value
+        if base_value:
+            pct_change = (abs_change / base_value) * 100.0
+        else:
+            pct_change = 0.0 if current_value == 0 else None
+        return {
+            "abs_change": abs_change,
+            "pct_change": pct_change,
+        }
+
+    portfolio_performance = {
+        key: compute_portfolio_growth(start_dt)
+        for key, _, start_dt, _ in period_definitions
+    }
+
+    markets = ["NASDAQ", "NYSE", "AMEX"]
+    market_rows = []
+    for market in markets:
+        sum_value, count_value = (
+            db.session.query(
+                func.coalesce(func.sum(StockSymbol.pctchange), 0),
+                func.count(StockSymbol.symbol),
+            )
+            .filter(StockSymbol.market == market)
+            .one()
+        )
+
+        avg_daily_change = (sum_value / count_value) if count_value else 0.0
+
+        values = {}
+        for key, _, _, trading_days in period_definitions:
+            if avg_daily_change:
+                compounded = (pow(1 + (avg_daily_change / 100.0), trading_days) - 1) * 100.0
+            else:
+                compounded = 0.0
+            values[key] = compounded
+
+        display_name = "APEX" if market == "AMEX" else market
+        market_rows.append({
+            "label": display_name,
+            "values": values,
+        })
+
+    performance_rows = [
+        {
+            "label": "Portfolio",
+            "values": {key: portfolio_performance[key]["pct_change"] for key, _, _, _ in period_definitions},
+        }
+    ] + market_rows
+
+    return render_template(
+        "reports.html",
+        chart_labels=chart_labels,
+        chart_cost_values=chart_cost_values,
+        chart_market_values=chart_market_values,
+        total_cost_basis=total_cost_basis,
+        total_market_value=total_market_value,
+        total_buy_value=total_buy_value,
+        total_sell_value=total_sell_value,
+        total_performance=total_performance,
+        total_performance_pct=total_performance_pct,
+        realized_cost=realized_cost,
+        period_definitions=period_definitions,
+        performance_rows=performance_rows,
+        portfolio_performance=portfolio_performance,
+        holding_rows=enriched_holdings,
+    )
+
+
+@app.route("/login", methods=["GET", "POST"])
 def login():
-    if is_logged_in():
-        return redirect(url_for('home'))
+    if request.method == "POST":
+        email = request.form.get("email")
+        password = request.form.get("password")
 
-    if request.method == 'POST':
-        email = request.form['email']
-        password = request.form['password']
         user = User.query.filter_by(email=email).first()
 
         if user and check_password_hash(user.password_hash, password):
             session['user_id'] = user.id
-            session['full_name'] = user.full_name
-            flash("Login successful", "success")
-            return redirect(url_for('home', redirect_after=True))
+            session['user_name'] = user.full_name
+            session['is_admin'] = bool(user.is_admin)
 
-        flash("Incorrect email or password", "danger")
+            login_log = UserLoginLog(user_id=user.id)
+            db.session.add(login_log)
+            db.session.commit()
 
-<<<<<<< Updated upstream
-    return render_template('login.html')
-=======
             flash("Login successful!", "success")
-            return render_template("login.html", redirect_to_home=True)
+            return redirect(url_for("home"))
         else:
             flash("Invalid email or password", "danger")
-            return render_template("login.html", redirect_to_home=False)
->>>>>>> Stashed changes
+            return redirect(url_for("login"))
 
-@app.route('/logout')
+    return render_template("login.html")
+
+
+@app.route("/logout")
 def logout():
-    session.clear()
-    return redirect(url_for('home'))
+    user_id = session.get('user_id')
+    if user_id:
+        latest_log = (
+            UserLoginLog.query
+            .filter_by(user_id=user_id, logout_at=None)
+            .order_by(UserLoginLog.login_at.desc())
+            .first()
+        )
+        if latest_log:
+            latest_log.logout_at = datetime.utcnow()
+            db.session.commit()
 
-<<<<<<< Updated upstream
-@app.route('/portfolio')
-=======
     session.pop('user_id', None)
     session.pop('user_name', None)
     session.pop('is_admin', None)
+    flash("You have been logged out.", "info")
     return redirect(url_for("home"))
 
 
@@ -741,132 +1415,297 @@ def admin_customers():
 
 # Portfolio management routes - by Kadir Karabulut
 @app.route("/portfolio", methods=["GET", "POST"])
->>>>>>> Stashed changes
 def portfolio():
-    if not is_logged_in():
-        return redirect(url_for('login'))
+    if 'user_id' not in session:
+        flash("Please log in to view your portfolio.", "warning")
+        return redirect(url_for("login"))
 
     user_id = session['user_id']
-    holdings = PortfolioHolding.query.filter_by(user_id=user_id).all()
-    data = []
-    total_cost_basis = 0
+    user = User.query.get(user_id)
+
+    if not user:
+        session.pop('user_id', None)
+        session.pop('user_name', None)
+        flash("User not found. Please sign in again.", "danger")
+        return redirect(url_for("login"))
+
+    market_status = get_market_status()
+    market_open = market_status.get("is_open")
+    market_notice = format_market_notice(market_status) if not market_open else None
+
+    if request.method == "POST":
+        market_status = get_market_status()
+        if not market_status.get("is_open"):
+            flash(format_market_notice(market_status), "warning")
+            return redirect(url_for("portfolio"))
+
+        action = request.form.get("action", "add")
+
+        if action == "delete":
+            holding_id = request.form.get("holding_id")
+            try:
+                holding_id = int(holding_id)
+            except (TypeError, ValueError):
+                flash("Invalid request for sell.", "danger")
+                return redirect(url_for("portfolio"))
+
+            holding = PortfolioHolding.query.filter_by(id=holding_id, user_id=user_id).first()
+            if not holding:
+                flash("Stock holding not found.", "warning")
+                return redirect(url_for("portfolio"))
+
+            stock_row = (
+                StockSymbol.query
+                .filter(func.upper(StockSymbol.symbol) == holding.symbol.upper())
+                .order_by(StockSymbol.market)
+                .first()
+            )
+
+            price_value = None
+            if stock_row and stock_row.lastsale is not None and stock_row.lastsale > 0:
+                price_value = float(stock_row.lastsale)
+            elif holding.average_price:
+                price_value = float(holding.average_price)
+            else:
+                price_value = 0.0
+
+            total_value = float(holding.shares or 0) * price_value
+
+            symbol_str = holding.symbol.upper()
+
+            trade_entry = Trade(
+                user_id=user_id,
+                symbol=symbol_str,
+                shares=holding.shares,
+                price=price_value,
+                total_value=total_value,
+                transaction_type="SELL",
+            )
+
+            db.session.add(trade_entry)
+
+            db.session.delete(holding)
+            user.wallet_balance += total_value
+            db.session.commit()
+            flash(f"Sold {symbol_str}. ${total_value:.2f} added to your wallet.", "info")
+            return redirect(url_for("portfolio"))
+
+        symbol = (request.form.get("symbol") or "").upper().strip()
+        shares = request.form.get("shares")
+
+        if not symbol or not shares:
+            flash("Symbol and shares are required to add a stock holding.", "danger")
+        else:
+            try:
+                shares_value = float(shares)
+                if shares_value <= 0:
+                    raise ValueError
+
+                stock_row = (
+                    StockSymbol.query
+                    .filter(func.upper(StockSymbol.symbol) == symbol)
+                    .order_by(StockSymbol.market)
+                    .first()
+                )
+
+                if not stock_row or stock_row.lastsale is None:
+                    flash("Unable to find a last sale price for that symbol.", "warning")
+                    return redirect(url_for("portfolio"))
+
+                price_value = float(stock_row.lastsale)
+
+                if price_value <= 0:
+                    flash("Last sale price must be a positive number.", "danger")
+                    return redirect(url_for("portfolio"))
+
+                total_cost = shares_value * price_value
+                if user.wallet_balance < total_cost:
+                    flash("Insufficient wallet balance. Deposit funds into your wallet before buying.", "warning")
+                    return redirect(url_for("portfolio"))
+
+                holding = PortfolioHolding.query.filter_by(user_id=user_id, symbol=symbol).first()
+
+                if holding:
+                    total_shares = holding.shares + shares_value
+                    holding.average_price = (
+                        (holding.shares * holding.average_price) + (shares_value * price_value)
+                    ) / total_shares
+                    holding.shares = total_shares
+                    holding.updated_at = datetime.utcnow()
+                    flash(f"Updated stock holding for {symbol}.", "info")
+                else:
+                    holding = PortfolioHolding(
+                        user_id=user_id,
+                        symbol=symbol,
+                        shares=shares_value,
+                        average_price=price_value,
+                    )
+                    db.session.add(holding)
+                    flash(f"Added {symbol} to your portfolio using wallet funds.", "success")
+
+                trade_entry = Trade(
+                    user_id=user_id,
+                    symbol=symbol,
+                    shares=shares_value,
+                    price=price_value,
+                    total_value=total_cost,
+                    transaction_type="BUY",
+                )
+
+                user.wallet_balance -= total_cost
+
+                db.session.add(trade_entry)
+                db.session.commit()
+            except ValueError:
+                db.session.rollback()
+                flash("Shares must be a positive number.", "danger")
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Unable to save stock holding: {str(e)}", "danger")
+
+        return redirect(url_for("portfolio"))
+
+    holdings = (
+        PortfolioHolding.query
+        .filter_by(user_id=user_id)
+        .order_by(PortfolioHolding.symbol)
+        .all()
+    )
+
+    total_cost_basis = sum(h.shares * h.average_price for h in holdings)
+
+    stock_lookup = {}
+    if holdings:
+        symbols = [h.symbol.upper() for h in holdings]
+        stock_rows = (
+            StockSymbol.query
+            .filter(StockSymbol.symbol.in_(symbols))
+            .all()
+        )
+        stock_lookup = {row.symbol.upper(): row for row in stock_rows}
+
+    enriched_holdings = []
     total_market_value = 0
+    has_market_value = False
 
-    for h in holdings:
-        stock = StockSymbols.query.get(h.symbol)
-        current_price = stock.lastsale if stock else 0
-        cost_value = h.shares * h.average_price
-        curr_value = h.shares * current_price
+    for holding in holdings:
+        stock = stock_lookup.get(holding.symbol.upper())
+        current_price = stock.lastsale if stock and stock.lastsale is not None else None
+        current_value = holding.shares * current_price if current_price is not None else None
+        average_price = holding.average_price if holding.average_price is not None else None
+        cost_value = holding.shares * average_price if average_price is not None else None
+        if current_value is not None:
+            total_market_value += current_value
+            has_market_value = True
 
-        total_cost_basis += cost_value
-        total_market_value += curr_value
+        enriched_holdings.append(
+            {
+                "holding": holding,
+                "stock": stock,
+                "current_price": current_price,
+                "current_value": current_value,
+                "cost_value": cost_value,
+                "average_price": average_price,
+                "pct_change": stock.pctchange if stock else None,
+                "market": stock.market if stock else None,
+            }
+        )
 
-        data.append({
-            "holding": h,
-            "stock": stock,
-            "cost_value": cost_value,
-            "current_price": current_price,
-            "current_value": curr_value,
-            "pct_change": stock.pctchange if stock else None,
-            "market": stock.market if stock else None
-        })
+    total_market_value = total_market_value if has_market_value else None
+    unrealized_pl = (
+        total_market_value - total_cost_basis
+        if total_market_value is not None
+        else None
+    )
 
-    unrealized_pl = total_market_value - total_cost_basis
-    return render_template('portfolio.html',
-        holdings=data,
+    ipo_stocks = (
+        StockSymbol.query
+        .filter(StockSymbol.createdate.isnot(None))
+        .order_by(StockSymbol.createdate.desc(), StockSymbol.symbol)
+        .limit(25)
+        .all()
+    )
+
+    return render_template(
+        "portfolio.html",
+        holdings=enriched_holdings,
         total_cost_basis=total_cost_basis,
         total_market_value=total_market_value,
         unrealized_pl=unrealized_pl,
-        wallet_balance=0,
-        ipo_stocks=[],
-        market_open=is_market_open(),
-        market_notice="")
+        market_open=market_open,
+        market_notice=market_notice,
+        market_status=market_status,
+        wallet_balance=user.wallet_balance,
+        ipo_stocks=ipo_stocks,
+    )
+# End of portfolio management routes
 
-@app.route('/account_settings', methods=['GET', 'POST'])
-def account_settings():
-    if not is_logged_in():
-        return redirect(url_for('login'))
 
-    user = User.query.get(session['user_id'])
-    tab = request.args.get('tab', 'profile')
+@app.route("/api/symbols")
+def api_symbols():
+    query = (request.args.get("q") or "").upper().strip()
+    limit = min(request.args.get("limit", default=20, type=int), 50)
 
-    form_data = {}
-    payment_methods = []
-    wallet_balance = 0
+    if not query:
+        return jsonify([])
 
-    if request.method == 'POST':
-        tab = request.form.get('tab', 'profile')
-        form_type = request.form.get('form_type')
-
-        if form_type == 'profile':
-            # Logic here
-            pass
-        elif form_type == 'wallet':
-            # Logic here
-            pass
-
-    return render_template(
-        'account_settings.html',
-        user=user,
-        form_data=form_data,
-        active_tab=tab,
-        payment_methods=payment_methods,
-        wallet_balance=wallet_balance
+    results = (
+        StockSymbol.query
+        .filter(StockSymbol.symbol.like(f"{query}%"))
+        .order_by(StockSymbol.symbol)
+        .limit(limit)
+        .all()
     )
 
-@app.route('/reports')
-def reports():
-    if not is_logged_in():
-        return redirect(url_for('login'))
+    payload = [
+        {
+            "symbol": stock.symbol,
+            "name": stock.name,
+            "market": stock.market,
+            "lastsale": stock.lastsale,
+        }
+        for stock in results
+    ]
 
-    try:
-        user_id = session['user_id']
-        tx = Transactions.query.filter_by(user_id=user_id).all()
+    return jsonify(payload)
 
-        transactions = [{
-            "symbol": t.symbol or "",
-            "transaction_type": t.transaction_type or "",
-            "shares": t.shares or 0,
-            "price": t.price or 0,
-            "total_amount": t.total_amount or 0,
-            "transaction_date": t.transaction_date or datetime.utcnow()
-        } for t in tx]
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if request.method == "POST":
+        full_name = (request.form.get("full_name") or "").strip()
+        email = request.form.get("email")
+        password = request.form.get("password")
 
-        return render_template(
-            'reports.html',
-            transactions=transactions,
-            total_cost_basis=0,
-            total_market_value=0,
-            total_performance=0,
-            total_performance_pct=0,
-            total_sell_value=0,
-            realized_cost=0,
-            holding_rows=[],
-            performance_rows=[],
-            period_definitions=[],
-            portfolio_performance={}
+        password_hash = generate_password_hash(password)
+
+        first_name = None
+        last_name = None
+        if full_name:
+            name_parts = full_name.split(None, 1)
+            first_name = name_parts[0]
+            if len(name_parts) > 1:
+                last_name = name_parts[1]
+
+        new_user = User(
+            full_name=full_name or email,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            password_hash=password_hash,
         )
-    except Exception as e:
-        import traceback
-        print("REPORT ERROR:", traceback.format_exc())
-        flash("Failed to load reports.", "danger")
-        return redirect(url_for('home'))
+        db.session.add(new_user)
+        db.session.commit()
 
-@app.route('/admin')
-def admin():
-    return render_template('admin.html', users=User.query.all())
+        flash("Account created successfully!", "success")
+        return redirect(url_for("login"))
 
-@app.route('/admin/customers')
-def admin_customers():
-    return render_template('admin_customers.html', users=User.query.all())
+    return render_template("signup.html")
 
-@app.errorhandler(500)
-def internal(e):
-    return "<h1>500 - Internal Error</h1>", 500
 
-@app.errorhandler(404)
-def missing(e):
-    return "<h1>404 - Not Found</h1>", 404
+with app.app_context():
+    db.create_all()
+    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        start_random_price_generator()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)
