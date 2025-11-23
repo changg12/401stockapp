@@ -30,7 +30,7 @@ DEFAULT_MARKET_CLOSE_TIME = time(16, 0)
 RANDOM_PRICE_MAX_CHANGE = 50.0  # percent bounds for daily move
 RANDOM_PRICE_STDDEV = 10.0  # bell curve spread (standard deviation)
 RANDOM_PRICE_QUANTUM = 0.01  # enforce 0.01% increments
-RANDOM_PRICE_CHECK_INTERVAL = 180  # run every 180 seconds
+RANDOM_PRICE_CHECK_INTERVAL = 30  # run every 180 seconds
 
 _random_price_thread = None
 _random_price_lock = threading.Lock()
