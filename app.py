@@ -16,7 +16,7 @@ app = Flask(__name__)
 bootstrap = Bootstrap(app)
 
 # Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://admin:password@flaskdb.cxewmo2iqc1i.us-east-1.rds.amazonaws.com/flask_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:password@localhost/flask_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'awdasdawdasdawdasdawdasd'
 
@@ -795,10 +795,11 @@ def login():
             db.session.commit()
 
             flash("Login successful!", "success")
-            return redirect(url_for("home"))
+            return render_template("login.html", redirect_to_home=True)
         else:
             flash("Invalid email or password", "danger")
-            return redirect(url_for("login"))
+            return render_template("login.html", redirect_to_home=False)
+
 
     return render_template("login.html")
 
@@ -820,7 +821,6 @@ def logout():
     session.pop('user_id', None)
     session.pop('user_name', None)
     session.pop('is_admin', None)
-    flash("You have been logged out.", "info")
     return redirect(url_for("home"))
 
 
